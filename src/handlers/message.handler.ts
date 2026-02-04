@@ -29,16 +29,17 @@ export class MessageHandler {
     // For groups, check if message starts with prefix
     const hasPrefix = text.startsWith(config.botPrefix);
 
-    // Check if the message is a reply to the bot
+    // Check if the message is a reply to the bot or mentions the bot
     const isReplyToBot = this.isReplyToBotMessage(message);
+    const isMentioningBot = this.isMentioningBot(message);
 
     // Remove prefix if present
     const cleanText = hasPrefix
       ? text.slice(config.botPrefix.length).trim()
       : text;
 
-    // For groups: respond only if has prefix OR is a reply to bot
-    if (isGroup && !hasPrefix && !isReplyToBot) {
+    // For groups: respond only if has prefix OR is a reply to bot OR mentions bot
+    if (isGroup && !hasPrefix && !isReplyToBot && !isMentioningBot) {
       return;
     }
 
@@ -123,6 +124,21 @@ export class MessageHandler {
     // Normalize the participant JID for comparison
     const participantNormalized = contextInfo.participant.replace(/:.*@/, '@');
     return participantNormalized === botJid;
+  }
+
+  private isMentioningBot(message: proto.IWebMessageInfo): boolean {
+    const contextInfo = message.message?.extendedTextMessage?.contextInfo;
+    const mentionedJids = contextInfo?.mentionedJid;
+    if (!mentionedJids || mentionedJids.length === 0) return false;
+
+    const botJid = this.whatsapp.getBotJid();
+    if (!botJid) return false;
+
+    // Check if any mentioned JID matches the bot's JID
+    return mentionedJids.some(jid => {
+      const normalizedJid = jid.replace(/:.*@/, '@');
+      return normalizedJid === botJid;
+    });
   }
 
   private async handleCommand(
