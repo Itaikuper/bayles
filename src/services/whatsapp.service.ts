@@ -160,4 +160,11 @@ export class WhatsAppService {
     // Normalize JID format (remove :0 suffix if present)
     return this.sock.user.id.replace(/:.*@/, '@');
   }
+
+  getBotLid(): string | null {
+    // Get the LID (Linked Identity) format of the bot's JID
+    const user = this.sock?.user as { lid?: string } | undefined;
+    if (!user?.lid) return null;
+    return user.lid.replace(/:.*@/, '@');
+  }
 }

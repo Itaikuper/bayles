@@ -35,8 +35,9 @@ export class MessageHandler {
 
     // Debug logging
     const botJid = this.whatsapp.getBotJid();
+    const botLid = this.whatsapp.getBotLid();
     const contextInfo = message.message?.extendedTextMessage?.contextInfo;
-    logger.info(`DEBUG - Bot JID: ${botJid}`);
+    logger.info(`DEBUG - Bot JID: ${botJid}, Bot LID: ${botLid}`);
     logger.info(`DEBUG - Mentioned JIDs: ${JSON.stringify(contextInfo?.mentionedJid)}`);
     logger.info(`DEBUG - isReplyToBot: ${isReplyToBot}, isMentioningBot: ${isMentioningBot}, hasPrefix: ${hasPrefix}`);
 
@@ -139,12 +140,12 @@ export class MessageHandler {
     if (!mentionedJids || mentionedJids.length === 0) return false;
 
     const botJid = this.whatsapp.getBotJid();
-    if (!botJid) return false;
+    const botLid = this.whatsapp.getBotLid();
 
-    // Check if any mentioned JID matches the bot's JID
+    // Check if any mentioned JID matches the bot's JID or LID
     return mentionedJids.some(jid => {
       const normalizedJid = jid.replace(/:.*@/, '@');
-      return normalizedJid === botJid;
+      return normalizedJid === botJid || normalizedJid === botLid;
     });
   }
 
