@@ -33,6 +33,13 @@ export class MessageHandler {
     const isReplyToBot = this.isReplyToBotMessage(message);
     const isMentioningBot = this.isMentioningBot(message);
 
+    // Debug logging
+    const botJid = this.whatsapp.getBotJid();
+    const contextInfo = message.message?.extendedTextMessage?.contextInfo;
+    logger.info(`DEBUG - Bot JID: ${botJid}`);
+    logger.info(`DEBUG - Mentioned JIDs: ${JSON.stringify(contextInfo?.mentionedJid)}`);
+    logger.info(`DEBUG - isReplyToBot: ${isReplyToBot}, isMentioningBot: ${isMentioningBot}, hasPrefix: ${hasPrefix}`);
+
     // Remove prefix if present
     const cleanText = hasPrefix
       ? text.slice(config.botPrefix.length).trim()
