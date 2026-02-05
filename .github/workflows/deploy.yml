@@ -18,4 +18,4 @@ jobs:
             cd ~/bayles
             git pull origin master
             npm run build
-            pm2 restart bayles
+            pm2 restart all
