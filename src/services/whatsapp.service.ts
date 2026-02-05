@@ -205,6 +205,20 @@ export class WhatsAppService {
     logger.info(`Sent document to ${jid}`);
   }
 
+  async sendImageReply(
+    jid: string,
+    imageBuffer: Buffer,
+    caption: string,
+    quotedMessage: proto.IWebMessageInfo
+  ): Promise<void> {
+    if (!this.sock) throw new Error('WhatsApp not connected');
+    await this.sock.sendMessage(jid, {
+      image: imageBuffer,
+      caption: caption || '',
+    }, { quoted: quotedMessage });
+    logger.info(`Sent image reply to ${jid}`);
+  }
+
   async sendReply(
     jid: string,
     text: string,

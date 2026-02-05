@@ -68,6 +68,41 @@ export class GeminiService {
     }
   }
 
+  async generateImage(prompt: string): Promise<{ image: Buffer; text?: string } | null> {
+    try {
+      const response = await this.ai.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: prompt,
+      });
+
+      if (!response.candidates?.[0]?.content?.parts) {
+        logger.warn('Image generation returned no parts');
+        return null;
+      }
+
+      let imageBuffer: Buffer | null = null;
+      let text: string | undefined;
+
+      for (const part of response.candidates[0].content.parts) {
+        if (part.inlineData?.data) {
+          imageBuffer = Buffer.from(part.inlineData.data, 'base64');
+        } else if (part.text) {
+          text = part.text;
+        }
+      }
+
+      if (!imageBuffer) {
+        logger.warn('Image generation returned no image data');
+        return null;
+      }
+
+      return { image: imageBuffer, text };
+    } catch (error) {
+      logger.error('Gemini image generation error:', error);
+      return null;
+    }
+  }
+
   clearHistory(jid: string): void {
     this.conversationHistory.delete(jid);
     logger.info(`Cleared conversation history for ${jid}`);

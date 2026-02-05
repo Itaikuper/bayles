@@ -91,6 +91,13 @@ export class MessageHandler {
       return;
     }
 
+    // Check for image generation request (keyword-based)
+    const imagePrompt = this.extractImagePrompt(cleanText);
+    if (imagePrompt !== null) {
+      await this.handleImageGeneration(jid, imagePrompt, message);
+      return;
+    }
+
     // Generate AI response
     try {
       // In groups, include sender's name so the AI knows who's talking
@@ -186,6 +193,10 @@ export class MessageHandler {
 
       case 'scheduled':
         await this.handleListScheduledCommand(jid, originalMessage);
+        break;
+
+      case 'image':
+        await this.handleImageGeneration(jid, args.join(' '), originalMessage);
         break;
 
       default:
@@ -305,15 +316,91 @@ export class MessageHandler {
     );
   }
 
+  private extractImagePrompt(text: string): string | null {
+    const lower = text.toLowerCase();
+
+    // Hebrew triggers
+    const hebrewPatterns = [
+      /^(?:תייצר|ייצר|צור|תצור)\s+(?:לי\s+)?תמונה\s+(?:של\s+)?(.+)/i,
+      /^(?:תצייר|צייר)\s+(?:לי\s+)?(.+)/i,
+      /^תמונה\s+של\s+(.+)/i,
+    ];
+
+    for (const pattern of hebrewPatterns) {
+      const match = text.match(pattern);
+      if (match) return match[1].trim();
+    }
+
+    // English triggers
+    const englishPatterns = [
+      /^(?:generate|create)\s+(?:an?\s+)?image\s+(?:of\s+)?(.+)/i,
+      /^(?:draw|imagine)\s+(.+)/i,
+    ];
+
+    for (const pattern of englishPatterns) {
+      const match = lower.match(pattern);
+      if (match) return match[1].trim();
+    }
+
+    return null;
+  }
+
+  private async handleImageGeneration(
+    jid: string,
+    prompt: string,
+    originalMessage: proto.IWebMessageInfo
+  ): Promise<void> {
+    if (!prompt.trim()) {
+      await this.whatsapp.sendReply(
+        jid,
+        'מה לצייר? כתוב תיאור.\nדוגמה: /image חתול על הירח',
+        originalMessage
+      );
+      return;
+    }
+
+    try {
+      await this.whatsapp.sendReply(jid, '🎨 מייצר תמונה...', originalMessage);
+
+      const result = await this.gemini.generateImage(prompt.trim());
+      if (result) {
+        await this.whatsapp.sendImageReply(
+          jid,
+          result.image,
+          result.text || '',
+          originalMessage
+        );
+      } else {
+        await this.whatsapp.sendReply(
+          jid,
+          'לא הצלחתי ליצור את התמונה. נסה תיאור אחר.',
+          originalMessage
+        );
+      }
+    } catch (error) {
+      logger.error('Error generating image:', error);
+      await this.whatsapp.sendReply(
+        jid,
+        'שגיאה ביצירת התמונה. נסה שוב.',
+        originalMessage
+      );
+    }
+  }
+
   private getHelpText(): string {
     return `*Bayles Bot - Help*
 
 *Chat with AI:*
 ${config.botPrefix} <your message>
 
+*Image Generation:*
+/image <description> - Generate an image
+Or: "ייצר תמונה של..." / "תצייר..."
+
 *Commands:*
 /help - Show this help message
 /clear - Clear conversation history
+/image - Generate an image from text
 /groups - List all groups with IDs
 /schedule - Schedule a message
 /scheduled - List scheduled messages
@@ -321,6 +408,8 @@ ${config.botPrefix} <your message>
 *Examples:*
 ${config.botPrefix} What's the weather like?
 ${config.botPrefix} Tell me a joke
+/image a cat sitting on the moon
+ייצר תמונה של חתול על הירח
 /schedule 123@g.us "0 9 * * *" Good morning!`;
   }
 }
