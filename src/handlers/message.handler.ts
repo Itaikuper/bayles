@@ -93,10 +93,15 @@ export class MessageHandler {
 
     // Generate AI response
     try {
+      // In groups, include sender's name so the AI knows who's talking
+      const messageForAI = isGroup && message.pushName
+        ? `[${message.pushName}]: ${cleanText}`
+        : cleanText;
+
       const response = await this.gemini.generateResponse(
         jid,
-        cleanText,
-        decision.customPrompt // Pass custom prompt if configured
+        messageForAI,
+        decision.customPrompt
       );
       await this.whatsapp.sendReply(jid, response, message);
     } catch (error) {
