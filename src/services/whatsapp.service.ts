@@ -252,6 +252,20 @@ export class WhatsAppService {
     logger.info(`Sent reply to ${jid}`);
   }
 
+  async sendVoiceReply(
+    jid: string,
+    audioBuffer: Buffer,
+    quotedMessage: proto.IWebMessageInfo
+  ): Promise<void> {
+    if (!this.sock) throw new Error('WhatsApp not connected');
+    await this.sock.sendMessage(jid, {
+      audio: audioBuffer,
+      ptt: true,
+      mimetype: 'audio/ogg; codecs=opus',
+    }, { quoted: quotedMessage });
+    logger.info(`Sent voice reply to ${jid}`);
+  }
+
   async getGroups(): Promise<{ id: string; name: string }[]> {
     if (!this.sock) throw new Error('WhatsApp not connected');
     const groups = await this.sock.groupFetchAllParticipating();

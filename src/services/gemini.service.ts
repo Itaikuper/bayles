@@ -1,4 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
+import { spawnSync } from 'child_process';
+import { writeFileSync, readFileSync, unlinkSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import type { ChatHistory } from '../types/index.js';
@@ -272,6 +276,75 @@ export class GeminiService {
     } catch (error) {
       logger.error('Gemini image generation error:', error);
       throw error;
+    }
+  }
+
+  async generateSpeech(text: string): Promise<Buffer> {
+    try {
+      logger.info(`Generating speech (${text.length} chars)`);
+
+      const response = await this.ai.models.generateContent({
+        model: 'gemini-2.5-flash-preview-tts',
+        contents: text,
+        config: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: 'Kore',
+              },
+            },
+          },
+        },
+      });
+
+      const audioPart = response.candidates?.[0]?.content?.parts?.find(
+        (p: any) => p.inlineData?.data
+      );
+      if (!audioPart?.inlineData?.data) {
+        throw new Error('No audio data in TTS response');
+      }
+
+      const pcmBuffer = Buffer.from(audioPart.inlineData.data, 'base64');
+      logger.info(`TTS returned ${pcmBuffer.length} bytes PCM`);
+
+      return this.convertPcmToOgg(pcmBuffer);
+    } catch (error) {
+      logger.error('Gemini TTS error:', error);
+      throw error;
+    }
+  }
+
+  private convertPcmToOgg(pcmBuffer: Buffer): Buffer {
+    const ts = Date.now();
+    const tmpPcm = join(tmpdir(), `bayles-${ts}.pcm`);
+    const tmpOgg = join(tmpdir(), `bayles-${ts}.ogg`);
+
+    try {
+      writeFileSync(tmpPcm, pcmBuffer);
+
+      const result = spawnSync('ffmpeg', [
+        '-f', 's16le',
+        '-ar', '24000',
+        '-ac', '1',
+        '-i', tmpPcm,
+        '-c:a', 'libopus',
+        '-b:a', '64k',
+        '-y',
+        tmpOgg,
+      ], { timeout: 30_000 });
+
+      if (result.status !== 0) {
+        const stderr = result.stderr?.toString() || 'unknown error';
+        throw new Error(`ffmpeg failed (status ${result.status}): ${stderr.slice(-200)}`);
+      }
+
+      const oggBuffer = readFileSync(tmpOgg);
+      logger.info(`Converted PCM to OGG: ${oggBuffer.length} bytes`);
+      return oggBuffer;
+    } finally {
+      try { unlinkSync(tmpPcm); } catch { /* ignore */ }
+      try { unlinkSync(tmpOgg); } catch { /* ignore */ }
     }
   }
 

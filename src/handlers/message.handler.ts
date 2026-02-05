@@ -8,6 +8,8 @@ import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 
 export class MessageHandler {
+  private voiceModeJids: Set<string> = new Set();
+
   constructor(
     private whatsapp: WhatsAppService,
     private gemini: GeminiService,
@@ -151,7 +153,7 @@ export class MessageHandler {
         messageForAI,
         decision.customPrompt
       );
-      await this.sendResponseWithImages(jid, response, message);
+      await this.sendResponse(jid, response, message);
     } catch (error) {
       logger.error('Error generating response:', error);
       await this.whatsapp.sendReply(
@@ -225,7 +227,19 @@ export class MessageHandler {
         decision.customPrompt,
         contextPrefix
       );
-      await this.whatsapp.sendReply(jid, response, message);
+
+      // Voice mode: convert text response to speech
+      if (this.voiceModeJids.has(jid)) {
+        try {
+          const speechBuffer = await this.gemini.generateSpeech(response);
+          await this.whatsapp.sendVoiceReply(jid, speechBuffer, message);
+        } catch (ttsError) {
+          logger.error('Voice mode TTS failed for audio reply, falling back to text:', ttsError);
+          await this.whatsapp.sendReply(jid, response, message);
+        }
+      } else {
+        await this.whatsapp.sendReply(jid, response, message);
+      }
     } catch (error) {
       logger.error('Error processing voice message:', error);
       await this.whatsapp.sendReply(
@@ -300,7 +314,7 @@ export class MessageHandler {
         decision.customPrompt,
         contextPrefix
       );
-      await this.sendResponseWithImages(jid, response, message);
+      await this.sendResponse(jid, response, message);
     } catch (error) {
       logger.error('Error processing image:', error);
       await this.whatsapp.sendReply(
@@ -379,7 +393,7 @@ export class MessageHandler {
         contextPrefix,
         fileName
       );
-      await this.sendResponseWithImages(jid, response, message);
+      await this.sendResponse(jid, response, message);
     } catch (error) {
       logger.error('Error processing document:', error);
       await this.whatsapp.sendReply(
@@ -430,6 +444,26 @@ export class MessageHandler {
           logger.warn(`Auto image generation failed: ${error}`);
         }
       }
+    }
+  }
+
+  private async sendResponse(
+    jid: string,
+    text: string,
+    message: proto.IWebMessageInfo
+  ): Promise<void> {
+    if (!this.voiceModeJids.has(jid)) {
+      await this.sendResponseWithImages(jid, text, message);
+      return;
+    }
+
+    // Voice mode: convert text response to speech
+    try {
+      const audioBuffer = await this.gemini.generateSpeech(text);
+      await this.whatsapp.sendVoiceReply(jid, audioBuffer, message);
+    } catch (error) {
+      logger.error('Voice mode TTS failed, falling back to text:', error);
+      await this.sendResponseWithImages(jid, text, message);
     }
   }
 
@@ -508,6 +542,16 @@ export class MessageHandler {
 
       case 'proimage':
         await this.handleImageGeneration(jid, args.join(' '), originalMessage, true);
+        break;
+
+      case 'voice':
+        if (this.voiceModeJids.has(jid)) {
+          this.voiceModeJids.delete(jid);
+          await this.whatsapp.sendReply(jid, 'מצב קול כבוי - חוזר לתשובות טקסט', originalMessage);
+        } else {
+          this.voiceModeJids.add(jid);
+          await this.whatsapp.sendReply(jid, 'מצב קול פעיל - אענה בהודעות קוליות', originalMessage);
+        }
         break;
 
       case 'birthdays':
@@ -880,6 +924,7 @@ PRO: "ייצר תמונת פרו של..." / "תמונת פרו של..."
 *Commands:*
 /help - Show this help message
 /clear - Clear conversation history
+/voice - Toggle voice mode (respond with voice messages)
 /image - Generate an image from text
 /proimage - Generate PRO image (Nano Banana Pro)
 /groups - List all groups with IDs
