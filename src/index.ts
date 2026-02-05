@@ -38,11 +38,13 @@ async function main() {
     // Initialize message handler
     const messageHandler = new MessageHandler(whatsapp, gemini, scheduler, botControl);
 
-    // Register message handler
-    whatsapp.onMessage((message) => {
-      messageHandler.handle(message).catch((err) => {
+    // Register message handler (async - awaited by WhatsApp service for serialized processing)
+    whatsapp.onMessage(async (message) => {
+      try {
+        await messageHandler.handle(message);
+      } catch (err) {
         logger.error('Message handler error:', err);
-      });
+      }
     });
 
     // Start API server (dashboard)
