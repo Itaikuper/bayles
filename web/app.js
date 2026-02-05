@@ -714,7 +714,7 @@ function cronToHumanReadable(cronExpr, oneTime) {
 
 function Scheduler() {
   const [scheduled, setScheduled] = useState([]);
-  const [groups, setGroups] = useState([]);
+  const [chats, setChats] = useState([]);
   const [form, setForm] = useState({ jid: '', message: '', time: '09:00', days: [...ALL_DAYS], datetime: '', useAi: false });
   const [mode, setMode] = useState('recurring');
   const [loading, setLoading] = useState(true);
@@ -724,15 +724,18 @@ function Scheduler() {
   }, []);
 
   const loadData = async () => {
+    // Load independently so one failure doesn't break the other
     try {
-      const [scheduledData, groupsData] = await Promise.all([
-        api.get('/scheduler'),
-        api.get('/groups'),
-      ]);
+      const scheduledData = await api.get('/scheduler');
       setScheduled(scheduledData);
-      setGroups(groupsData);
     } catch (err) {
-      console.error('Failed to load data:', err);
+      console.error('Failed to load scheduled messages:', err);
+    }
+    try {
+      const chatsData = await api.get('/bot-control/chats');
+      setChats(chatsData.filter(c => c.enabled));
+    } catch (err) {
+      console.error('Failed to load chats:', err);
     }
     setLoading(false);
   };
@@ -807,8 +810,8 @@ function Scheduler() {
               <label>קבוצה / איש קשר</label>
               <select value={form.jid} onChange={e => setForm({...form, jid: e.target.value})} required>
                 <option value="">בחר...</option>
-                {groups.map(g => (
-                  <option key={g.id} value={g.id}>{g.name}</option>
+                {chats.map(c => (
+                  <option key={c.jid} value={c.jid}>{c.display_name || c.jid}</option>
                 ))}
               </select>
             </div>
@@ -948,7 +951,7 @@ function Scheduler() {
               <tbody>
                 {scheduled.map(s => (
                   <tr key={s.id}>
-                    <td>{groups.find(g => g.id === s.jid)?.name || s.jid}</td>
+                    <td>{chats.find(c => c.jid === s.jid)?.display_name || s.jid}</td>
                     <td className="message-preview">{s.message}</td>
                     <td>
                       <span style={{
@@ -1304,7 +1307,7 @@ const MONTH_NAMES = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מא
   'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
 
 function Birthdays() {
-  const [groups, setGroups] = useState([]);
+  const [chats, setChats] = useState([]);
   const [selectedJid, setSelectedJid] = useState('');
   const [birthdays, setBirthdays] = useState([]);
   const [listText, setListText] = useState('');
@@ -1316,20 +1319,21 @@ function Birthdays() {
   const [manualForm, setManualForm] = useState({ person_name: '', birth_day: '', birth_month: '' });
 
   useEffect(() => {
-    loadGroups();
+    loadChats();
   }, []);
 
   useEffect(() => {
     if (selectedJid) loadBirthdays(selectedJid);
   }, [selectedJid]);
 
-  const loadGroups = async () => {
+  const loadChats = async () => {
     try {
-      const data = await api.get('/groups');
-      setGroups(data);
-      if (data.length > 0) setSelectedJid(data[0].id);
+      const data = await api.get('/bot-control/chats');
+      const enabled = data.filter(c => c.enabled);
+      setChats(enabled);
+      if (enabled.length > 0) setSelectedJid(enabled[0].jid);
     } catch (err) {
-      console.error('Failed to load groups:', err);
+      console.error('Failed to load chats:', err);
     }
     setLoading(false);
   };
@@ -1404,8 +1408,8 @@ function Birthdays() {
           <div className="form-group">
             <label>הברכות יישלחו לצ׳אט שנבחר</label>
             <select value={selectedJid} onChange={e => setSelectedJid(e.target.value)}>
-              {groups.map(g => (
-                <option key={g.id} value={g.id}>{g.name}</option>
+              {chats.map(c => (
+                <option key={c.jid} value={c.jid}>{c.display_name || c.jid}</option>
               ))}
             </select>
           </div>
