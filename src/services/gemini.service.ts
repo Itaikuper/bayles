@@ -20,24 +20,20 @@ export class GeminiService {
     if (!config.autoImageGeneration) return '';
     return `
 
-יש לך יכולת ליצור תמונות בתוך התשובה. כשתמונה תעזור להבנה, הוסף תגית מיוחדת:
-[IMAGE: תיאור מפורט באנגלית]
+יש לך יכולת ליצור תמונות (גרפים, דיאגרמות, איורים, אינפוגרפיקות).
 
-אם התמונה צריכה להכיל טקסט בעברית, השתמש בתגית PRO במקום (איכות גבוהה יותר לעברית):
-[PRO_IMAGE: תיאור מפורט באנגלית, with Hebrew text labels written right-to-left]
+חשוב מאוד: אל תייצר תמונות באופן אוטומטי! במקום זה:
+- כשאתה חושב שתמונה תעזור להבנה, הצע למשתמש: "אני יכול ליצור תמונה/גרף/דיאגרמה של [הנושא], רוצה?"
+- רק כשהמשתמש מבקש במפורש לייצר תמונה (למשל "כן", "תייצר", "בוא", "רוצה"), הכנס תגית:
+  [IMAGE: תיאור מפורט באנגלית]
+- אם התמונה צריכה טקסט בעברית, השתמש ב:
+  [PRO_IMAGE: תיאור מפורט באנגלית, with Hebrew text labels]
 
-כללים קריטיים:
-1. התמונה חייבת להיות קשורה ישירות לנושא הספציפי שנדון כרגע בשיחה. כלול בתיאור את הפרטים הקונקרטיים מהשיחה.
+כללים לתגית IMAGE/PRO_IMAGE (רק אחרי שהמשתמש אישר):
+1. התמונה חייבת להיות קשורה ישירות לנושא הספציפי שנדון. כלול פרטים קונקרטיים מהשיחה.
 2. התיאור באנגלית, מפורט ומדויק.
-3. אם צריך טקסט בעברית בתמונה - השתמש ב-PRO_IMAGE ולא IMAGE, וציין בתיאור "Hebrew text" מפורשות.
-4. השתמש בתגית רק כשתמונה באמת תוסיף ערך - לא בכל תשובה.
-5. אל תכתוב "אני מייצר תמונה" - פשוט הכנס את התגית.
-6. אחרי שהכנסת תגית IMAGE - אתה יכול להתייחס לתמונה בטקסט (למשל "כפי שניתן לראות בתמונה...").
-
-דוגמאות:
-- לימוד גמרא על מנחות: [PRO_IMAGE: diagram of the Menachot offering process showing an omer of fine flour divided into three vessels, with Hebrew labels for each step: קמיצה, הקטרה, שיריים, arranged left to right]
-- גרף סינוסים: [IMAGE: precise mathematical graph of y=sin(x) from x=0 to x=2pi, with x-axis labeled at 0, pi/2, pi, 3pi/2, 2pi and y-axis from -1 to 1, grid lines, curve in blue]
-- גיאומטריה: [IMAGE: geometric construction showing triangle ABC inscribed in circle, with perpendicular bisectors meeting at circumcenter O, labeled angles and sides]`;
+3. טקסט בעברית בתמונה = PRO_IMAGE.
+4. אל תכתוב "אני מייצר תמונה" - פשוט הכנס את התגית.`;
   }
 
   async generateResponse(jid: string, userMessage: string, customPrompt?: string): Promise<string> {
