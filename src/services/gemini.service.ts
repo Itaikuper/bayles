@@ -338,6 +338,10 @@ export class GeminiService {
         tmpOgg,
       ], { timeout: 30_000 });
 
+      if (result.error) {
+        throw new Error(`ffmpeg not found or failed to spawn: ${result.error.message}. Install with: sudo apt install ffmpeg`);
+      }
+
       if (result.status !== 0) {
         const stderr = result.stderr?.toString() || 'unknown error';
         throw new Error(`ffmpeg failed (status ${result.status}): ${stderr.slice(-200)}`);
