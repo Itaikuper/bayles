@@ -137,10 +137,16 @@ export class GeminiService {
       const response = await this.ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: prompt,
+        config: {
+          responseModalities: ['TEXT', 'IMAGE'],
+        },
       });
 
       if (!response.candidates?.[0]?.content?.parts) {
-        logger.warn('Image generation returned no parts');
+        logger.warn('Image generation returned no parts', {
+          finishReason: response.candidates?.[0]?.finishReason,
+          candidatesCount: response.candidates?.length,
+        });
         return null;
       }
 
@@ -156,7 +162,13 @@ export class GeminiService {
       }
 
       if (!imageBuffer) {
-        logger.warn('Image generation returned no image data');
+        logger.warn('Image generation returned no image data', {
+          partsCount: response.candidates[0].content.parts.length,
+          partTypes: response.candidates[0].content.parts.map(p =>
+            p.text ? 'text' : p.inlineData ? 'inlineData' : 'unknown'
+          ),
+          textContent: text?.substring(0, 200),
+        });
         return null;
       }
 
