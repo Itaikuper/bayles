@@ -75,7 +75,7 @@ export class MessageHandler {
     }
 
     // Check if message contains trigger words (פרופסור / בוט)
-    const hasTriggerWord = /(?:^|[\s,.!?])(?:פרופסור|בוט)(?:[\s,.!?]|$)/.test(text);
+    const hasTriggerWord = /(?:^|[\s,.!?])(?:פרופסור|בוט|bot)(?:[\s,.!?]|$)/i.test(text);
 
     // For groups: respond only if has prefix OR is a reply to bot OR mentions bot OR has trigger word
     if (isGroup && !hasPrefix && !isReplyToBot && !isMentioningBot && !hasTriggerWord) {
@@ -84,7 +84,7 @@ export class MessageHandler {
 
     // Strip trigger word from beginning of message
     if (hasTriggerWord) {
-      cleanText = cleanText.replace(/^(?:פרופסור|בוט)[,\s]*/, '').trim();
+      cleanText = cleanText.replace(/^(?:פרופסור|בוט|bot)[,\s]*/i, '').trim();
     }
 
     // Get decision from bot control service
@@ -245,7 +245,7 @@ export class MessageHandler {
     // In groups: only respond if reply-to-bot or caption has trigger word
     if (isGroup) {
       const isReplyToBot = this.isReplyToBotMessage(message);
-      const hasTriggerWord = /(?:^|[\s,.!?])(?:פרופסור|בוט)(?:[\s,.!?]|$)/.test(caption);
+      const hasTriggerWord = /(?:^|[\s,.!?])(?:פרופסור|בוט|bot)(?:[\s,.!?]|$)/i.test(caption);
 
       if (!isReplyToBot && !hasTriggerWord) {
         return;
@@ -283,7 +283,7 @@ export class MessageHandler {
 
       // Strip trigger words from caption
       const cleanCaption = caption
-        ? caption.replace(/(?:^|[\s,.!?])(?:פרופסור|בוט)(?:[\s,.!?]|$)/g, ' ').trim()
+        ? caption.replace(/(?:^|[\s,.!?])(?:פרופסור|בוט|bot)(?:[\s,.!?]|$)/ig, ' ').trim()
         : undefined;
 
       const response = await this.gemini.generateDocumentAnalysisResponse(
@@ -322,7 +322,7 @@ export class MessageHandler {
     if (isGroup) {
       const isReplyToBot = this.isReplyToBotMessage(message);
       const isMentioned = this.isMentioningBot(message);
-      const hasTriggerWord = /(?:^|[\s,.!?])(?:פרופסור|בוט)(?:[\s,.!?]|$)/.test(caption);
+      const hasTriggerWord = /(?:^|[\s,.!?])(?:פרופסור|בוט|bot)(?:[\s,.!?]|$)/i.test(caption);
 
       if (!isReplyToBot && !isMentioned && !hasTriggerWord) {
         return;
@@ -360,7 +360,7 @@ export class MessageHandler {
 
       // Strip trigger words from caption
       const cleanCaption = caption
-        ? caption.replace(/(?:^|[\s,.!?])(?:פרופסור|בוט)(?:[\s,.!?]|$)/g, ' ').trim()
+        ? caption.replace(/(?:^|[\s,.!?])(?:פרופסור|בוט|bot)(?:[\s,.!?]|$)/ig, ' ').trim()
         : undefined;
 
       const response = await this.gemini.generateDocumentAnalysisResponse(
