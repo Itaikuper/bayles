@@ -20,20 +20,24 @@ export class GeminiService {
     if (!config.autoImageGeneration) return '';
     return `
 
-כשאתה רוצה להציג תמונה, גרף, דיאגרמה, או איור לצורכי הסבר או לימוד, הוסף תגית מיוחדת בפורמט הזה:
-[IMAGE: תיאור מפורט באנגלית של התמונה שברצונך ליצור]
+יש לך יכולת ליצור תמונות בתוך התשובה. כשתמונה תעזור להבנה, הוסף תגית מיוחדת:
+[IMAGE: תיאור מפורט באנגלית]
+
+אם התמונה צריכה להכיל טקסט בעברית, השתמש בתגית PRO במקום (איכות גבוהה יותר לעברית):
+[PRO_IMAGE: תיאור מפורט באנגלית, with Hebrew text labels written right-to-left]
+
+כללים קריטיים:
+1. התמונה חייבת להיות קשורה ישירות לנושא הספציפי שנדון כרגע בשיחה. כלול בתיאור את הפרטים הקונקרטיים מהשיחה.
+2. התיאור באנגלית, מפורט ומדויק.
+3. אם צריך טקסט בעברית בתמונה - השתמש ב-PRO_IMAGE ולא IMAGE, וציין בתיאור "Hebrew text" מפורשות.
+4. השתמש בתגית רק כשתמונה באמת תוסיף ערך - לא בכל תשובה.
+5. אל תכתוב "אני מייצר תמונה" - פשוט הכנס את התגית.
+6. אחרי שהכנסת תגית IMAGE - אתה יכול להתייחס לתמונה בטקסט (למשל "כפי שניתן לראות בתמונה...").
 
 דוגמאות:
-- גיאומטריה: [IMAGE: geometric diagram showing triangle ABC with angle A=60 degrees, labeled sides and height drawn from vertex C to base AB]
-- גרף מתמטי: [IMAGE: graph of sine wave y=sin(x) from 0 to 2pi with labeled x and y axes, key points marked at pi/2, pi, 3pi/2, 2pi]
-- אינפוגרפיקה: [IMAGE: infographic showing the structure of a Talmud page with Gemara text in the center, Rashi commentary on the inner margin, Tosafot on the outer margin, with labels in Hebrew]
-- תהליך: [IMAGE: flowchart showing photosynthesis process: sunlight + water + CO2 -> glucose + oxygen, with labeled arrows and colored stages]
-
-כללים חשובים:
-- התיאור חייב להיות באנגלית ומפורט מספיק ליצירת תמונה ברורה
-- השתמש בזה רק כשתמונה באמת תעזור להבנה - לא בכל תשובה
-- אל תציין שאתה "מייצר תמונה" או "יוצר איור" בטקסט - פשוט הכנס את התגית במקום המתאים בתשובה
-- אפשר להכניס יותר מתגית אחת בתשובה אם צריך`;
+- לימוד גמרא על מנחות: [PRO_IMAGE: diagram of the Menachot offering process showing an omer of fine flour divided into three vessels, with Hebrew labels for each step: קמיצה, הקטרה, שיריים, arranged left to right]
+- גרף סינוסים: [IMAGE: precise mathematical graph of y=sin(x) from x=0 to x=2pi, with x-axis labeled at 0, pi/2, pi, 3pi/2, 2pi and y-axis from -1 to 1, grid lines, curve in blue]
+- גיאומטריה: [IMAGE: geometric construction showing triangle ABC inscribed in circle, with perpendicular bisectors meeting at circumcenter O, labeled angles and sides]`;
   }
 
   async generateResponse(jid: string, userMessage: string, customPrompt?: string): Promise<string> {

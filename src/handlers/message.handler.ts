@@ -404,18 +404,18 @@ export class MessageHandler {
     }
   }
 
-  private parseImageTags(text: string): { cleanText: string; imagePrompts: string[] } {
-    const imagePrompts: string[] = [];
-    const tagRegex = /\[IMAGE:\s*(.+?)\]/g;
+  private parseImageTags(text: string): { cleanText: string; imagePrompts: { prompt: string; pro: boolean }[] } {
+    const imagePrompts: { prompt: string; pro: boolean }[] = [];
+    const tagRegex = /\[(PRO_IMAGE|IMAGE):\s*(.+?)\]/g;
     let match;
     while ((match = tagRegex.exec(text)) !== null) {
-      const prompt = match[1].trim();
+      const prompt = match[2].trim();
       if (prompt.length > 0) {
-        imagePrompts.push(prompt);
+        imagePrompts.push({ prompt, pro: match[1] === 'PRO_IMAGE' });
       }
     }
     const cleanText = text
-      .replace(/\[IMAGE:\s*.+?\]/g, '')
+      .replace(/\[(?:PRO_IMAGE|IMAGE):\s*.+?\]/g, '')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
     return { cleanText, imagePrompts };
@@ -433,10 +433,10 @@ export class MessageHandler {
     }
 
     if (config.autoImageGeneration && parsed.imagePrompts.length > 0) {
-      for (const prompt of parsed.imagePrompts.slice(0, 3)) {
+      for (const { prompt, pro } of parsed.imagePrompts.slice(0, 3)) {
         try {
-          logger.info(`Auto-generating image: "${prompt.substring(0, 80)}..."`);
-          const result = await this.gemini.generateImage(prompt, false);
+          logger.info(`Auto-generating ${pro ? 'PRO ' : ''}image: "${prompt.substring(0, 80)}..."`);
+          const result = await this.gemini.generateImage(prompt, pro);
           if (result) {
             await this.whatsapp.sendImageReply(jid, result.image, result.text || '', message);
           }
