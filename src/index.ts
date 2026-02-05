@@ -1,6 +1,7 @@
 import { WhatsAppService } from './services/whatsapp.service.js';
 import { GeminiService } from './services/gemini.service.js';
 import { SchedulerService } from './services/scheduler.service.js';
+import { BirthdayService } from './services/birthday.service.js';
 import { getBotControlService } from './services/bot-control.service.js';
 import { MessageHandler } from './handlers/message.handler.js';
 import { validateConfig, config } from './config/env.js';
@@ -32,11 +33,15 @@ async function main() {
     // Restore scheduled messages from database
     scheduler.restoreFromDatabase();
 
+    // Initialize birthday service
+    const birthdayService = new BirthdayService(whatsapp, gemini);
+    birthdayService.start();
+
     // Initialize bot control service
     const botControl = getBotControlService();
 
     // Initialize message handler
-    const messageHandler = new MessageHandler(whatsapp, gemini, scheduler, botControl);
+    const messageHandler = new MessageHandler(whatsapp, gemini, scheduler, botControl, birthdayService);
 
     // Register message handler (async - awaited by WhatsApp service for serialized processing)
     whatsapp.onMessage(async (message) => {
@@ -49,7 +54,7 @@ async function main() {
 
     // Start API server (dashboard)
     const apiPort = parseInt(process.env.API_PORT || '3000');
-    const app = createApiServer(whatsapp, gemini, scheduler, botControl);
+    const app = createApiServer(whatsapp, gemini, scheduler, botControl, birthdayService);
     startApiServer(app, apiPort);
 
     logger.info('Bot is running!');
@@ -61,6 +66,7 @@ async function main() {
     const shutdown = () => {
       logger.info('Shutting down...');
       scheduler.cancelAll();
+      birthdayService.stop();
       closeDatabase();
       process.exit(0);
     };

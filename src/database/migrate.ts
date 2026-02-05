@@ -141,4 +141,30 @@ export function runMigrations(): void {
     db.prepare('INSERT INTO migrations (name) VALUES (?)').run('003_scheduler_ai');
     logger.info('Migration 003_scheduler_ai completed');
   }
+
+  // Migration 004: Birthday reminders
+  const applied004 = db.prepare('SELECT name FROM migrations WHERE name = ?').get('004_birthdays');
+
+  if (!applied004) {
+    logger.info('Running migration: 004_birthdays');
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS birthdays (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        jid TEXT NOT NULL,
+        person_name TEXT NOT NULL,
+        birth_day INTEGER NOT NULL CHECK(birth_day >= 1 AND birth_day <= 31),
+        birth_month INTEGER NOT NULL CHECK(birth_month >= 1 AND birth_month <= 12),
+        custom_message TEXT,
+        last_sent_year INTEGER,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_birthdays_jid ON birthdays(jid)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_birthdays_date ON birthdays(birth_month, birth_day)`);
+
+    db.prepare('INSERT INTO migrations (name) VALUES (?)').run('004_birthdays');
+    logger.info('Migration 004_birthdays completed');
+  }
 }

@@ -5,6 +5,7 @@ import { WhatsAppService } from '../services/whatsapp.service.js';
 import { GeminiService } from '../services/gemini.service.js';
 import { SchedulerService } from '../services/scheduler.service.js';
 import { BotControlService } from '../services/bot-control.service.js';
+import { BirthdayService } from '../services/birthday.service.js';
 import { createRoutes } from './routes/index.js';
 import { logger } from '../utils/logger.js';
 
@@ -14,7 +15,8 @@ export function createApiServer(
   whatsapp: WhatsAppService,
   gemini: GeminiService,
   scheduler: SchedulerService,
-  botControl: BotControlService
+  botControl: BotControlService,
+  birthdayService: BirthdayService
 ): Express {
   const app = express();
 
@@ -36,7 +38,7 @@ export function createApiServer(
   app.use(express.static(path.join(__dirname, '../../web')));
 
   // API routes - inject services
-  app.use('/api', createRoutes(whatsapp, gemini, scheduler, botControl));
+  app.use('/api', createRoutes(whatsapp, gemini, scheduler, botControl, birthdayService));
 
   // SPA fallback - serve index.html for non-API routes
   app.use((req: Request, res: Response, next: NextFunction) => {

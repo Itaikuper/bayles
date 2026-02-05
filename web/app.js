@@ -40,6 +40,7 @@ function Sidebar({ currentPage, setCurrentPage }) {
     { id: 'whitelist', label: 'רשימה לבנה', icon: '✅' },
     { id: 'activity', label: 'יומן פעילות', icon: '📋' },
     { id: 'scheduler', label: 'תזמון', icon: '📅' },
+    { id: 'birthdays', label: 'ימי הולדת', icon: '🎂' },
     { id: 'groups', label: 'קבוצות', icon: '👥' },
     { id: 'messages', label: 'הודעות', icon: '💬' },
     { id: 'ai', label: 'הגדרות AI', icon: '🤖' },
@@ -1298,6 +1299,225 @@ function AISettings() {
 }
 
 // Main App Component
+// Birthdays Component
+const MONTH_NAMES = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
+  'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+
+function Birthdays() {
+  const [groups, setGroups] = useState([]);
+  const [selectedJid, setSelectedJid] = useState('');
+  const [birthdays, setBirthdays] = useState([]);
+  const [listText, setListText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+
+  // Manual add form
+  const [showManual, setShowManual] = useState(false);
+  const [manualForm, setManualForm] = useState({ person_name: '', birth_day: '', birth_month: '' });
+
+  useEffect(() => {
+    loadGroups();
+  }, []);
+
+  useEffect(() => {
+    if (selectedJid) loadBirthdays(selectedJid);
+  }, [selectedJid]);
+
+  const loadGroups = async () => {
+    try {
+      const data = await api.get('/groups');
+      setGroups(data);
+      if (data.length > 0) setSelectedJid(data[0].id);
+    } catch (err) {
+      console.error('Failed to load groups:', err);
+    }
+    setLoading(false);
+  };
+
+  const loadBirthdays = async (jid) => {
+    try {
+      const data = await api.get(`/birthdays/by-jid/${encodeURIComponent(jid)}`);
+      setBirthdays(data);
+    } catch (err) {
+      console.error('Failed to load birthdays:', err);
+    }
+  };
+
+  const handleAddList = async (e) => {
+    e.preventDefault();
+    if (!listText.trim() || !selectedJid) return;
+
+    setAdding(true);
+    try {
+      const result = await api.post('/birthdays/parse', { jid: selectedJid, text: listText });
+      alert(`נוספו ${result.count} ימי הולדת!`);
+      setListText('');
+      loadBirthdays(selectedJid);
+    } catch (err) {
+      alert('שגיאה בהוספת ימי הולדת. בדוק את הפורמט.');
+    }
+    setAdding(false);
+  };
+
+  const handleAddManual = async (e) => {
+    e.preventDefault();
+    if (!manualForm.person_name || !manualForm.birth_day || !manualForm.birth_month) return;
+
+    try {
+      await api.post('/birthdays', {
+        jid: selectedJid,
+        person_name: manualForm.person_name,
+        birth_day: parseInt(manualForm.birth_day),
+        birth_month: parseInt(manualForm.birth_month),
+      });
+      setManualForm({ person_name: '', birth_day: '', birth_month: '' });
+      setShowManual(false);
+      loadBirthdays(selectedJid);
+    } catch (err) {
+      alert('שגיאה בהוספת יום הולדת');
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm('למחוק יום הולדת זה?')) return;
+    try {
+      await api.delete(`/birthdays/${id}`);
+      loadBirthdays(selectedJid);
+    } catch (err) {
+      alert('שגיאה במחיקה');
+    }
+  };
+
+  if (loading) return <div className="loading">טוען...</div>;
+
+  return (
+    <div>
+      <div className="header">
+        <h2>ימי הולדת</h2>
+      </div>
+
+      <div className="card">
+        <div className="card-header">
+          <h3>בחר צ׳אט</h3>
+        </div>
+        <div className="card-body">
+          <div className="form-group">
+            <label>הברכות יישלחו לצ׳אט שנבחר</label>
+            <select value={selectedJid} onChange={e => setSelectedJid(e.target.value)}>
+              {groups.map(g => (
+                <option key={g.id} value={g.id}>{g.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header">
+          <h3>הוספת ימי הולדת מרשימה (AI)</h3>
+        </div>
+        <div className="card-body">
+          <form onSubmit={handleAddList}>
+            <div className="form-group">
+              <label>כתוב רשימה חופשית - הבוט יפענח אותה</label>
+              <textarea
+                value={listText}
+                onChange={e => setListText(e.target.value)}
+                placeholder="דוגמה: איתי 5 פברואר יהודה 25 מרץ שרה 15/12"
+                required
+              />
+            </div>
+            <button type="submit" className="btn btn-primary" disabled={adding}>
+              {adding ? 'מעבד...' : 'הוסף רשימה'}
+            </button>
+          </form>
+          <div style={{marginTop: '8px', padding: '10px', background: '#e8f5e9', borderRadius: '6px', fontSize: '13px', lineHeight: '1.6'}}>
+            הבוט משתמש ב-AI כדי להבין את הרשימה. ברכות אוטומטיות נשלחות בכל יום הולדת ב-08:00 בבוקר.
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+          <h3>ימי הולדת שמורים ({birthdays.length})</h3>
+          <button className="btn btn-primary" onClick={() => setShowManual(!showManual)}>
+            {showManual ? 'ביטול' : 'הוספה ידנית'}
+          </button>
+        </div>
+        <div className="card-body">
+          {showManual && (
+            <form onSubmit={handleAddManual} style={{marginBottom: '16px', padding: '12px', background: '#f5f5f5', borderRadius: '6px'}}>
+              <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-end'}}>
+                <div className="form-group" style={{margin: 0, flex: 1, minWidth: '120px'}}>
+                  <label>שם</label>
+                  <input
+                    type="text"
+                    value={manualForm.person_name}
+                    onChange={e => setManualForm({...manualForm, person_name: e.target.value})}
+                    placeholder="שם"
+                    required
+                  />
+                </div>
+                <div className="form-group" style={{margin: 0, width: '80px'}}>
+                  <label>יום</label>
+                  <input
+                    type="number"
+                    min="1" max="31"
+                    value={manualForm.birth_day}
+                    onChange={e => setManualForm({...manualForm, birth_day: e.target.value})}
+                    required
+                  />
+                </div>
+                <div className="form-group" style={{margin: 0, width: '120px'}}>
+                  <label>חודש</label>
+                  <select
+                    value={manualForm.birth_month}
+                    onChange={e => setManualForm({...manualForm, birth_month: e.target.value})}
+                    required
+                  >
+                    <option value="">בחר...</option>
+                    {MONTH_NAMES.map((name, i) => (
+                      <option key={i + 1} value={i + 1}>{name}</option>
+                    ))}
+                  </select>
+                </div>
+                <button type="submit" className="btn btn-primary">הוסף</button>
+              </div>
+            </form>
+          )}
+
+          {birthdays.length === 0 ? (
+            <div className="empty-state">אין ימי הולדת שמורים</div>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>שם</th>
+                  <th>תאריך</th>
+                  <th>פעולות</th>
+                </tr>
+              </thead>
+              <tbody>
+                {birthdays.map(b => (
+                  <tr key={b.id}>
+                    <td>{b.person_name}</td>
+                    <td>{b.birth_day} {MONTH_NAMES[b.birth_month - 1]}</td>
+                    <td>
+                      <button className="btn btn-danger" onClick={() => handleDelete(b.id)}>
+                        מחק
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [currentPage, setCurrentPage] = useState('dashboard');
 
@@ -1308,6 +1528,7 @@ function App() {
       case 'whitelist': return <Whitelist />;
       case 'activity': return <ActivityLog />;
       case 'scheduler': return <Scheduler />;
+      case 'birthdays': return <Birthdays />;
       case 'groups': return <Groups />;
       case 'messages': return <Messages />;
       case 'ai': return <AISettings />;
