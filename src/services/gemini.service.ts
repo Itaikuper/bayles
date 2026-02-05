@@ -132,10 +132,13 @@ export class GeminiService {
     }
   }
 
-  async generateImage(prompt: string): Promise<{ image: Buffer; text?: string } | null> {
+  async generateImage(prompt: string, pro = false): Promise<{ image: Buffer; text?: string } | null> {
     try {
+      const model = pro ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
+      logger.info(`Generating image with model: ${model}`);
+
       const response = await this.ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
+        model,
         contents: prompt,
         config: {
           responseModalities: ['TEXT', 'IMAGE'],

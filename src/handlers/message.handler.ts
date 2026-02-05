@@ -114,9 +114,9 @@ export class MessageHandler {
     }
 
     // Check for image generation request (keyword-based)
-    const imagePrompt = this.extractImagePrompt(cleanText);
-    if (imagePrompt !== null) {
-      await this.handleImageGeneration(jid, imagePrompt, message);
+    const imageResult = this.extractImagePrompt(cleanText);
+    if (imageResult !== null) {
+      await this.handleImageGeneration(jid, imageResult.prompt, message, imageResult.pro);
       return;
     }
 
@@ -285,6 +285,10 @@ export class MessageHandler {
 
       case 'image':
         await this.handleImageGeneration(jid, args.join(' '), originalMessage);
+        break;
+
+      case 'proimage':
+        await this.handleImageGeneration(jid, args.join(' '), originalMessage, true);
         break;
 
       case 'birthdays':
@@ -533,8 +537,20 @@ export class MessageHandler {
     );
   }
 
-  private extractImagePrompt(text: string): string | null {
+  private extractImagePrompt(text: string): { prompt: string; pro: boolean } | null {
     const lower = text.toLowerCase();
+
+    // Hebrew PRO triggers (check first)
+    const hebrewProPatterns = [
+      /^(?:תייצר|ייצר|לייצר|צור|תצור)\s+(?:לי\s+)?תמונת?\s+פרו\s+(?:של\s+)?(.+)/i,
+      /^(?:תצייר|צייר|לצייר)\s+(?:לי\s+)?פרו\s+(.+)/i,
+      /^תמונת?\s+פרו\s+(?:של\s+)?(.+)/i,
+    ];
+
+    for (const pattern of hebrewProPatterns) {
+      const match = text.match(pattern);
+      if (match) return { prompt: match[1].trim(), pro: true };
+    }
 
     // Hebrew triggers
     const hebrewPatterns = [
@@ -545,7 +561,18 @@ export class MessageHandler {
 
     for (const pattern of hebrewPatterns) {
       const match = text.match(pattern);
-      if (match) return match[1].trim();
+      if (match) return { prompt: match[1].trim(), pro: false };
+    }
+
+    // English PRO triggers (check first)
+    const englishProPatterns = [
+      /^(?:generate|create)\s+(?:an?\s+)?pro\s+image\s+(?:of\s+)?(.+)/i,
+      /^pro\s+(?:draw|imagine)\s+(.+)/i,
+    ];
+
+    for (const pattern of englishProPatterns) {
+      const match = lower.match(pattern);
+      if (match) return { prompt: match[1].trim(), pro: true };
     }
 
     // English triggers
@@ -556,7 +583,7 @@ export class MessageHandler {
 
     for (const pattern of englishPatterns) {
       const match = lower.match(pattern);
-      if (match) return match[1].trim();
+      if (match) return { prompt: match[1].trim(), pro: false };
     }
 
     return null;
@@ -565,7 +592,8 @@ export class MessageHandler {
   private async handleImageGeneration(
     jid: string,
     prompt: string,
-    originalMessage: proto.IWebMessageInfo
+    originalMessage: proto.IWebMessageInfo,
+    pro = false
   ): Promise<void> {
     if (!prompt.trim()) {
       await this.whatsapp.sendReply(
@@ -577,9 +605,9 @@ export class MessageHandler {
     }
 
     try {
-      await this.whatsapp.sendReply(jid, '🎨 מייצר תמונה...', originalMessage);
+      await this.whatsapp.sendReply(jid, pro ? '🎨 מייצר תמונת PRO...' : '🎨 מייצר תמונה...', originalMessage);
 
-      const result = await this.gemini.generateImage(prompt.trim());
+      const result = await this.gemini.generateImage(prompt.trim(), pro);
       if (result) {
         await this.whatsapp.sendImageReply(
           jid,
@@ -613,7 +641,9 @@ ${config.botPrefix} <your message>
 
 *Image Generation:*
 /image <description> - Generate an image
+/proimage <description> - Generate PRO image (higher quality)
 Or: "ייצר תמונה של..." / "תצייר..."
+PRO: "ייצר תמונת פרו של..." / "תמונת פרו של..."
 
 *Birthday Reminders:*
 /birthdays - Manage birthdays
@@ -625,6 +655,7 @@ Or: "ייצר תמונה של..." / "תצייר..."
 /help - Show this help message
 /clear - Clear conversation history
 /image - Generate an image from text
+/proimage - Generate PRO image (Nano Banana Pro)
 /groups - List all groups with IDs
 /schedule - Schedule a message
 /scheduled - List scheduled messages
