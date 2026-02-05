@@ -10,9 +10,6 @@ auth_info/
 # Environment variables
 .env
 
-# Google service account credentials
-service-account*.json
-
 # Logs
 *.log
 npm-debug.log*
