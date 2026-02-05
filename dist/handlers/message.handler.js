@@ -27,6 +27,7 @@ export class MessageHandler {
             // For groups: skip (group names come from group metadata, not pushName)
             if (!isGroupChat) {
                 const existingConfig = this.botControl.getChatConfig(chatJid);
+                logger.info(`DEBUG existingConfig for ${chatJid}: found=${!!existingConfig}, display_name="${existingConfig?.display_name}"`);
                 if (existingConfig && !existingConfig.display_name) {
                     this.botControl.updateChat(chatJid, { display_name: message.pushName });
                     logger.info(`Saved display_name "${message.pushName}" for ${chatJid}`);
