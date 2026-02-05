@@ -12,13 +12,33 @@ export class GeminiService {
     this.ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
   }
 
+  private getImageInstructions(): string {
+    if (!config.autoImageGeneration) return '';
+    return `
+
+כשאתה רוצה להציג תמונה, גרף, דיאגרמה, או איור לצורכי הסבר או לימוד, הוסף תגית מיוחדת בפורמט הזה:
+[IMAGE: תיאור מפורט באנגלית של התמונה שברצונך ליצור]
+
+דוגמאות:
+- גיאומטריה: [IMAGE: geometric diagram showing triangle ABC with angle A=60 degrees, labeled sides and height drawn from vertex C to base AB]
+- גרף מתמטי: [IMAGE: graph of sine wave y=sin(x) from 0 to 2pi with labeled x and y axes, key points marked at pi/2, pi, 3pi/2, 2pi]
+- אינפוגרפיקה: [IMAGE: infographic showing the structure of a Talmud page with Gemara text in the center, Rashi commentary on the inner margin, Tosafot on the outer margin, with labels in Hebrew]
+- תהליך: [IMAGE: flowchart showing photosynthesis process: sunlight + water + CO2 -> glucose + oxygen, with labeled arrows and colored stages]
+
+כללים חשובים:
+- התיאור חייב להיות באנגלית ומפורט מספיק ליצירת תמונה ברורה
+- השתמש בזה רק כשתמונה באמת תעזור להבנה - לא בכל תשובה
+- אל תציין שאתה "מייצר תמונה" או "יוצר איור" בטקסט - פשוט הכנס את התגית במקום המתאים בתשובה
+- אפשר להכניס יותר מתגית אחת בתשובה אם צריך`;
+  }
+
   async generateResponse(jid: string, userMessage: string, customPrompt?: string): Promise<string> {
     try {
       // Get or initialize conversation history
       const history = this.conversationHistory.get(jid) || [];
 
       // Use custom prompt if provided, otherwise use default
-      const systemPrompt = customPrompt || config.systemPrompt;
+      const systemPrompt = (customPrompt || config.systemPrompt) + this.getImageInstructions();
 
       // Create chat with history, system instruction, and Google Search
       const chat = this.ai.chats.create({
@@ -77,7 +97,7 @@ export class GeminiService {
   ): Promise<string> {
     try {
       const history = this.conversationHistory.get(jid) || [];
-      const systemPrompt = customPrompt || config.systemPrompt;
+      const systemPrompt = (customPrompt || config.systemPrompt) + this.getImageInstructions();
 
       const chat = this.ai.chats.create({
         model: config.geminiModel,
@@ -143,7 +163,7 @@ export class GeminiService {
   ): Promise<string> {
     try {
       const history = this.conversationHistory.get(jid) || [];
-      const systemPrompt = customPrompt || config.systemPrompt;
+      const systemPrompt = (customPrompt || config.systemPrompt) + this.getImageInstructions();
 
       const chat = this.ai.chats.create({
         model: config.geminiModel,

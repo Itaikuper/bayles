@@ -20,6 +20,9 @@ export const config = {
   systemPrompt:
     process.env.SYSTEM_PROMPT ||
     'You are a helpful WhatsApp assistant. Keep responses concise and conversational. Respond in the same language as the user.',
+
+  // Auto image generation in learning conversations
+  autoImageGeneration: process.env.AUTO_IMAGE_GENERATION !== 'false',
 };
 
 export function validateConfig(): void {

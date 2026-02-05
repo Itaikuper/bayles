@@ -151,7 +151,7 @@ export class MessageHandler {
         messageForAI,
         decision.customPrompt
       );
-      await this.whatsapp.sendReply(jid, response, message);
+      await this.sendResponseWithImages(jid, response, message);
     } catch (error) {
       logger.error('Error generating response:', error);
       await this.whatsapp.sendReply(
@@ -300,7 +300,7 @@ export class MessageHandler {
         decision.customPrompt,
         contextPrefix
       );
-      await this.whatsapp.sendReply(jid, response, message);
+      await this.sendResponseWithImages(jid, response, message);
     } catch (error) {
       logger.error('Error processing image:', error);
       await this.whatsapp.sendReply(
@@ -379,7 +379,7 @@ export class MessageHandler {
         contextPrefix,
         fileName
       );
-      await this.whatsapp.sendReply(jid, response, message);
+      await this.sendResponseWithImages(jid, response, message);
     } catch (error) {
       logger.error('Error processing document:', error);
       await this.whatsapp.sendReply(
@@ -387,6 +387,49 @@ export class MessageHandler {
         'סליחה, לא הצלחתי לעבד את הקובץ. נסה שוב.',
         message
       );
+    }
+  }
+
+  private parseImageTags(text: string): { cleanText: string; imagePrompts: string[] } {
+    const imagePrompts: string[] = [];
+    const tagRegex = /\[IMAGE:\s*(.+?)\]/g;
+    let match;
+    while ((match = tagRegex.exec(text)) !== null) {
+      const prompt = match[1].trim();
+      if (prompt.length > 0) {
+        imagePrompts.push(prompt);
+      }
+    }
+    const cleanText = text
+      .replace(/\[IMAGE:\s*.+?\]/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    return { cleanText, imagePrompts };
+  }
+
+  private async sendResponseWithImages(
+    jid: string,
+    response: string,
+    message: proto.IWebMessageInfo
+  ): Promise<void> {
+    const parsed = this.parseImageTags(response);
+
+    if (parsed.cleanText) {
+      await this.whatsapp.sendReply(jid, parsed.cleanText, message);
+    }
+
+    if (config.autoImageGeneration && parsed.imagePrompts.length > 0) {
+      for (const prompt of parsed.imagePrompts.slice(0, 3)) {
+        try {
+          logger.info(`Auto-generating image: "${prompt.substring(0, 80)}..."`);
+          const result = await this.gemini.generateImage(prompt, false);
+          if (result) {
+            await this.whatsapp.sendImageReply(jid, result.image, result.text || '', message);
+          }
+        } catch (error) {
+          logger.warn(`Auto image generation failed: ${error}`);
+        }
+      }
     }
   }
 
