@@ -13,6 +13,8 @@ import { logger } from '../utils/logger.js';
 export class WhatsAppService {
   private sock: WASocket | null = null;
   private messageHandler: ((message: proto.IWebMessageInfo) => void) | null = null;
+  private processedMessages: Set<string> = new Set();
+  private readonly MAX_PROCESSED_CACHE = 1000;
 
   async connect(): Promise<WASocket> {
     const { state, saveCreds } = await useMultiFileAuthState(config.authDir);
@@ -66,6 +68,22 @@ export class WhatsAppService {
 
       for (const message of messages) {
         if (message.key.fromMe) continue; // Skip own messages
+
+        // Deduplicate - Baileys can fire the same message multiple times
+        const msgId = message.key.id;
+        if (msgId && this.processedMessages.has(msgId)) {
+          logger.info(`Skipping duplicate message: ${msgId}`);
+          continue;
+        }
+        if (msgId) {
+          this.processedMessages.add(msgId);
+          // Prevent memory leak - trim cache when too large
+          if (this.processedMessages.size > this.MAX_PROCESSED_CACHE) {
+            const first = this.processedMessages.values().next().value;
+            if (first) this.processedMessages.delete(first);
+          }
+        }
+
         if (this.messageHandler) {
           this.messageHandler(message);
         }
