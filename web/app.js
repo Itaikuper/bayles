@@ -241,15 +241,18 @@ function Whitelist() {
   }, []);
 
   const loadData = async () => {
+    // Load independently so one failure doesn't break the other
     try {
-      const [chatsData, groupsData] = await Promise.all([
-        api.get('/bot-control/chats'),
-        api.get('/bot-control/available-groups'),
-      ]);
+      const chatsData = await api.get('/bot-control/chats');
       setChats(chatsData);
+    } catch (err) {
+      console.error('Failed to load chats:', err);
+    }
+    try {
+      const groupsData = await api.get('/bot-control/available-groups');
       setAvailableGroups(groupsData);
     } catch (err) {
-      console.error('Failed to load data:', err);
+      console.error('Failed to load available groups:', err);
     }
     setLoading(false);
   };

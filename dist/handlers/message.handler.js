@@ -46,6 +46,14 @@ export class MessageHandler {
         const isGroup = jid.endsWith('@g.us');
         const sender = isGroup ? message.key.participant : jid;
         logger.info(`Message from ${sender} in ${isGroup ? 'group' : 'DM'}: ${text}`);
+        // Update display_name from pushName if missing
+        if (message.pushName) {
+            const chatJid = isGroup ? jid : (sender || jid);
+            const config = this.botControl.getChatConfig(chatJid);
+            if (config && !config.display_name) {
+                this.botControl.updateChat(chatJid, { display_name: message.pushName });
+            }
+        }
         // For groups, check if message starts with prefix
         const hasPrefix = text.startsWith(config.botPrefix);
         // Check if the message is a reply to the bot or mentions the bot
