@@ -27,7 +27,7 @@ async function main() {
     await whatsapp.connect();
 
     // Initialize scheduler (after WhatsApp connects)
-    const scheduler = new SchedulerService(whatsapp);
+    const scheduler = new SchedulerService(whatsapp, gemini);
 
     // Restore scheduled messages from database
     scheduler.restoreFromDatabase();

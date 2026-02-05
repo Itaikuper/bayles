@@ -690,11 +690,32 @@ function ActivityLog() {
 }
 
 // Scheduler Component
+const DAY_NAMES = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
+const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
+
+function cronToHumanReadable(cronExpr, oneTime) {
+  if (oneTime) return '(חד פעמי)';
+  try {
+    const parts = cronExpr.split(' ');
+    if (parts.length < 5) return cronExpr;
+    const minute = parts[0].padStart(2, '0');
+    const hour = parts[1].padStart(2, '0');
+    const daysPart = parts[4];
+    const timeStr = `${hour}:${minute}`;
+    if (daysPart === '*') return `${timeStr} כל יום`;
+    const dayNums = daysPart.split(',').map(Number);
+    const dayNames = dayNums.map(d => DAY_NAMES[d] || d).join(' ');
+    return `${timeStr} בימים ${dayNames}`;
+  } catch {
+    return cronExpr;
+  }
+}
+
 function Scheduler() {
   const [scheduled, setScheduled] = useState([]);
   const [groups, setGroups] = useState([]);
-  const [form, setForm] = useState({ jid: '', message: '', cronExpression: '', datetime: '' });
-  const [mode, setMode] = useState('cron');
+  const [form, setForm] = useState({ jid: '', message: '', time: '09:00', days: [...ALL_DAYS], datetime: '', useAi: false });
+  const [mode, setMode] = useState('recurring');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -715,23 +736,41 @@ function Scheduler() {
     setLoading(false);
   };
 
+  const toggleDay = (day) => {
+    const newDays = form.days.includes(day)
+      ? form.days.filter(d => d !== day)
+      : [...form.days, day].sort();
+    setForm({...form, days: newDays});
+  };
+
+  const toggleAllDays = () => {
+    setForm({...form, days: form.days.length === 7 ? [] : [...ALL_DAYS]});
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      if (mode === 'cron') {
+      if (mode === 'recurring') {
+        if (form.days.length === 0) {
+          alert('יש לבחור לפחות יום אחד');
+          return;
+        }
         await api.post('/scheduler', {
           jid: form.jid,
           message: form.message,
-          cronExpression: form.cronExpression,
+          time: form.time,
+          days: form.days,
+          useAi: form.useAi,
         });
       } else {
         await api.post('/scheduler/one-time', {
           jid: form.jid,
           message: form.message,
           datetime: form.datetime,
+          useAi: form.useAi,
         });
       }
-      setForm({ jid: '', message: '', cronExpression: '', datetime: '' });
+      setForm({ jid: '', message: '', time: '09:00', days: [...ALL_DAYS], datetime: '', useAi: false });
       loadData();
       alert('ההודעה תוזמנה בהצלחה!');
     } catch (err) {
@@ -773,13 +812,31 @@ function Scheduler() {
               </select>
             </div>
             <div className="form-group">
-              <label>הודעה</label>
+              <label>{form.useAi ? 'פרומפט AI' : 'הודעה'}</label>
               <textarea
                 value={form.message}
                 onChange={e => setForm({...form, message: e.target.value})}
-                placeholder="הקלד את ההודעה..."
+                placeholder={form.useAi
+                  ? 'הקלד פרומפט ל-AI, לדוגמה: בוקר טוב, מזג האוויר היום הוא ___ ותן המלצת לבוש'
+                  : 'הקלד את ההודעה...'}
                 required
               />
+            </div>
+            <div className="form-group">
+              <label style={{display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer'}}>
+                <input
+                  type="checkbox"
+                  checked={form.useAi}
+                  onChange={e => setForm({...form, useAi: e.target.checked})}
+                />
+                עיבוד AI - ההודעה תשמש כפרומפט ל-Gemini AI
+              </label>
+              {form.useAi && (
+                <div style={{marginTop: '8px', padding: '10px', background: '#e8f5e9', borderRadius: '6px', fontSize: '13px', lineHeight: '1.6'}}>
+                  <strong>מצב AI פעיל:</strong> הטקסט שלמעלה ישמש כפרומפט. Gemini ייצור תשובה חדשה בכל פעם שההודעה תישלח.
+                  {' '}יש לו גישה לחיפוש Google למידע בזמן אמת (מזג אוויר, חדשות וכו׳).
+                </div>
+              )}
             </div>
             <div className="form-group">
               <label>סוג תזמון</label>
@@ -787,10 +844,10 @@ function Scheduler() {
                 <label>
                   <input
                     type="radio"
-                    checked={mode === 'cron'}
-                    onChange={() => setMode('cron')}
+                    checked={mode === 'recurring'}
+                    onChange={() => setMode('recurring')}
                   />
-                  חוזר (Cron)
+                  חוזר
                 </label>
                 <label>
                   <input
@@ -802,17 +859,57 @@ function Scheduler() {
                 </label>
               </div>
             </div>
-            {mode === 'cron' ? (
-              <div className="form-group">
-                <label>ביטוי Cron (לדוגמה: "0 9 * * *" לכל יום ב-9 בבוקר)</label>
-                <input
-                  type="text"
-                  placeholder="0 9 * * *"
-                  value={form.cronExpression}
-                  onChange={e => setForm({...form, cronExpression: e.target.value})}
-                  required
-                />
-              </div>
+            {mode === 'recurring' ? (
+              <>
+                <div className="form-group">
+                  <label>שעה</label>
+                  <input
+                    type="time"
+                    value={form.time}
+                    onChange={e => setForm({...form, time: e.target.value})}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>ימים</label>
+                  <div style={{display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center'}}>
+                    <button
+                      type="button"
+                      onClick={toggleAllDays}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        border: '1px solid #ccc',
+                        background: form.days.length === 7 ? '#4caf50' : '#f5f5f5',
+                        color: form.days.length === 7 ? '#fff' : '#333',
+                        cursor: 'pointer',
+                        fontSize: '13px',
+                      }}
+                    >
+                      כל יום
+                    </button>
+                    {DAY_NAMES.map((name, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => toggleDay(i)}
+                        style={{
+                          padding: '6px 10px',
+                          borderRadius: '6px',
+                          border: '1px solid #ccc',
+                          background: form.days.includes(i) ? '#2196f3' : '#f5f5f5',
+                          color: form.days.includes(i) ? '#fff' : '#333',
+                          cursor: 'pointer',
+                          minWidth: '36px',
+                          fontSize: '13px',
+                        }}
+                      >
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
             ) : (
               <div className="form-group">
                 <label>תאריך ושעה</label>
@@ -841,7 +938,8 @@ function Scheduler() {
               <thead>
                 <tr>
                   <th>יעד</th>
-                  <th>הודעה</th>
+                  <th>הודעה / פרומפט</th>
+                  <th>סוג</th>
                   <th>תזמון</th>
                   <th>פעולות</th>
                 </tr>
@@ -851,7 +949,19 @@ function Scheduler() {
                   <tr key={s.id}>
                     <td>{groups.find(g => g.id === s.jid)?.name || s.jid}</td>
                     <td className="message-preview">{s.message}</td>
-                    <td>{s.cronExpression} {s.oneTime && '(חד פעמי)'}</td>
+                    <td>
+                      <span style={{
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        background: s.useAi ? '#e8f5e9' : '#f5f5f5',
+                        color: s.useAi ? '#2e7d32' : '#666',
+                        fontWeight: 'bold',
+                      }}>
+                        {s.useAi ? 'AI' : 'רגיל'}
+                      </span>
+                    </td>
+                    <td>{cronToHumanReadable(s.cronExpression, s.oneTime)}</td>
                     <td>
                       <button className="btn btn-danger" onClick={() => handleDelete(s.id)}>
                         בטל

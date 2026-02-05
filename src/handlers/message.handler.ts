@@ -288,7 +288,7 @@ export class MessageHandler {
     const list = scheduled
       .map(
         (s, i) =>
-          `${i + 1}. ID: ${s.id}\n   To: ${s.jid}\n   Cron: ${s.cronExpression}\n   Message: ${s.message.substring(0, 50)}${s.message.length > 50 ? '...' : ''}`
+          `${i + 1}. ${s.useAi ? '[AI] ' : ''}ID: ${s.id}\n   To: ${s.jid}\n   Cron: ${s.cronExpression}\n   ${s.useAi ? 'Prompt' : 'Message'}: ${s.message.substring(0, 50)}${s.message.length > 50 ? '...' : ''}`
       )
       .join('\n\n');
 

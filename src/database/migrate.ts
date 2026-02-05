@@ -129,4 +129,16 @@ export function runMigrations(): void {
     db.prepare('INSERT INTO migrations (name) VALUES (?)').run('002_bot_control');
     logger.info('Migration 002_bot_control completed');
   }
+
+  // Migration 003: Add AI support to scheduled messages
+  const applied003 = db.prepare('SELECT name FROM migrations WHERE name = ?').get('003_scheduler_ai');
+
+  if (!applied003) {
+    logger.info('Running migration: 003_scheduler_ai');
+
+    db.exec(`ALTER TABLE scheduled_messages ADD COLUMN use_ai INTEGER DEFAULT 0`);
+
+    db.prepare('INSERT INTO migrations (name) VALUES (?)').run('003_scheduler_ai');
+    logger.info('Migration 003_scheduler_ai completed');
+  }
 }

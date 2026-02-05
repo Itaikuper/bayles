@@ -7,6 +7,7 @@ export interface ScheduledMessage {
   cronExpression: string;
   task: ScheduledTask;
   oneTime: boolean;
+  useAi: boolean;
 }
 
 export interface ScheduledMessageInfo {
@@ -15,6 +16,7 @@ export interface ScheduledMessageInfo {
   message: string;
   cronExpression: string;
   oneTime: boolean;
+  useAi: boolean;
 }
 
 export interface BotConfig {
