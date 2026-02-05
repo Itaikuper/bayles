@@ -242,12 +242,13 @@ export class MessageHandler {
 
     logger.info(`Image message from ${sender} in ${isGroup ? 'group' : 'DM'}${caption ? `: ${caption}` : ''}`);
 
-    // In groups: only respond if reply-to-bot or caption has trigger word
+    // In groups: only respond if reply-to-bot, mentioned, or caption has trigger word
     if (isGroup) {
       const isReplyToBot = this.isReplyToBotMessage(message);
+      const isMentioned = this.isMentioningBot(message);
       const hasTriggerWord = /(?:^|[\s,.!?])(?:פרופסור|בוט|bot)(?:[\s,.!?]|$)/i.test(caption);
 
-      if (!isReplyToBot && !hasTriggerWord) {
+      if (!isReplyToBot && !isMentioned && !hasTriggerWord) {
         return;
       }
     }

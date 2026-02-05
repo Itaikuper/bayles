@@ -5,6 +5,7 @@ import makeWASocket, {
   proto,
   fetchLatestBaileysVersion,
   downloadContentFromMessage,
+  normalizeMessageContent,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import qrcode from 'qrcode-terminal';
@@ -119,14 +120,21 @@ export class WhatsAppService {
           const { messages, type } = events['messages.upsert'];
           if (type !== 'notify') return;
 
-          for (const message of messages) {
-            if (message.key.fromMe) continue;
+          for (const rawMessage of messages) {
+            if (rawMessage.key.fromMe) continue;
+
+            // Normalize: unwrap ephemeral, viewOnce, documentWithCaption wrappers
+            const normalizedContent = normalizeMessageContent(rawMessage.message);
+            const message = normalizedContent !== rawMessage.message
+              ? { ...rawMessage, message: normalizedContent } as proto.IWebMessageInfo
+              : rawMessage;
 
             const msgId = message.key.id;
             const jid = message.key.remoteJid || '';
             const text = message.message?.conversation
               || message.message?.extendedTextMessage?.text
               || message.message?.imageMessage?.caption
+              || message.message?.documentMessage?.caption
               || '';
 
             // Layer 1: Message ID dedup
