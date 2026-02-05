@@ -130,6 +130,9 @@ export class SchedulerService {
     restoreFromDatabase() {
         const scheduleRepo = new ScheduleRepository();
         const savedSchedules = scheduleRepo.findAllActive();
+        logger.info(`Found ${savedSchedules.length} active schedules in database`);
+        let restored = 0;
+        let failed = 0;
         for (const schedule of savedSchedules) {
             try {
                 const useAi = schedule.use_ai === 1;
@@ -152,14 +155,16 @@ export class SchedulerService {
                     // Recreate the scheduled task with same ID
                     this.scheduleMessageWithId(schedule.id, schedule.jid, schedule.message, schedule.cron_expression, schedule.one_time === 1, useAi);
                 }
+                restored++;
                 logger.info(`Restored scheduled message: ${schedule.id}`);
             }
             catch (error) {
-                logger.error(`Failed to restore scheduled message ${schedule.id}:`, error);
-                scheduleRepo.markInactive(schedule.id);
+                failed++;
+                logger.error(`Failed to restore scheduled message ${schedule.id} (cron: ${schedule.cron_expression}):`, error);
+                // Don't markInactive - leave in DB for next attempt or dashboard display
             }
         }
-        logger.info(`Restored ${savedSchedules.length} scheduled messages from database`);
+        logger.info(`Restore complete: ${restored} restored, ${failed} failed out of ${savedSchedules.length}`);
     }
     /**
      * Schedule a message with a specific ID (for restoring from database)

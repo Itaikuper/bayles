@@ -16,10 +16,22 @@ function timeToCron(time, days) {
 export function createSchedulerRoutes(scheduler) {
     const router = Router();
     const scheduleRepo = new ScheduleRepository();
-    // List all scheduled messages
+    // List all scheduled messages (with DB fallback)
     router.get('/', (req, res) => {
-        const scheduled = scheduler.listScheduledMessages();
-        res.json(scheduled);
+        const inMemory = scheduler.listScheduledMessages();
+        if (inMemory.length > 0) {
+            return res.json(inMemory);
+        }
+        // Fallback: show from DB if memory is empty (e.g. after failed restore)
+        const fromDb = scheduleRepo.findAllActive();
+        res.json(fromDb.map(s => ({
+            id: s.id,
+            jid: s.jid,
+            message: s.message,
+            cronExpression: s.cron_expression,
+            oneTime: s.one_time === 1,
+            useAi: s.use_ai === 1,
+        })));
     });
     // Create scheduled message (recurring)
     router.post('/', (req, res, next) => {

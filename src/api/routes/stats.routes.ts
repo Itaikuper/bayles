@@ -3,6 +3,7 @@ import { WhatsAppService } from '../../services/whatsapp.service.js';
 import { GeminiService } from '../../services/gemini.service.js';
 import { SchedulerService } from '../../services/scheduler.service.js';
 import { MessageRepository } from '../../database/repositories/message.repository.js';
+import { ScheduleRepository } from '../../database/repositories/schedule.repository.js';
 
 export function createStatsRoutes(
   whatsapp: WhatsAppService,
@@ -11,6 +12,7 @@ export function createStatsRoutes(
 ): Router {
   const router = Router();
   const messageRepo = new MessageRepository();
+  const scheduleRepo = new ScheduleRepository();
 
   // Get dashboard stats
   router.get('/', async (req: Request, res: Response, next: NextFunction) => {
@@ -27,7 +29,8 @@ export function createStatsRoutes(
         }
       }
 
-      const scheduledCount = scheduler.listScheduledMessages().length;
+      const inMemoryCount = scheduler.listScheduledMessages().length;
+      const scheduledCount = inMemoryCount > 0 ? inMemoryCount : scheduleRepo.countActive();
       const messagesSentToday = messageRepo.countToday();
 
       res.json({

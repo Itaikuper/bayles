@@ -1,8 +1,10 @@
 import { Router } from 'express';
 import { MessageRepository } from '../../database/repositories/message.repository.js';
+import { ScheduleRepository } from '../../database/repositories/schedule.repository.js';
 export function createStatsRoutes(whatsapp, _gemini, scheduler) {
     const router = Router();
     const messageRepo = new MessageRepository();
+    const scheduleRepo = new ScheduleRepository();
     // Get dashboard stats
     router.get('/', async (req, res, next) => {
         try {
@@ -17,7 +19,8 @@ export function createStatsRoutes(whatsapp, _gemini, scheduler) {
                     // Ignore errors when fetching groups
                 }
             }
-            const scheduledCount = scheduler.listScheduledMessages().length;
+            const inMemoryCount = scheduler.listScheduledMessages().length;
+            const scheduledCount = inMemoryCount > 0 ? inMemoryCount : scheduleRepo.countActive();
             const messagesSentToday = messageRepo.countToday();
             res.json({
                 isConnected,
