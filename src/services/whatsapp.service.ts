@@ -14,7 +14,9 @@ export class WhatsAppService {
   private sock: WASocket | null = null;
   private messageHandler: ((message: proto.IWebMessageInfo) => void) | null = null;
   private processedMessages: Set<string> = new Set();
+  private recentMessages: Map<string, number> = new Map(); // jid+text -> timestamp
   private readonly MAX_PROCESSED_CACHE = 1000;
+  private readonly DEDUP_WINDOW_MS = 10_000; // 10 second cooldown per jid+text
 
   async connect(): Promise<WASocket> {
     const { state, saveCreds } = await useMultiFileAuthState(config.authDir);
@@ -69,18 +71,38 @@ export class WhatsAppService {
       for (const message of messages) {
         if (message.key.fromMe) continue; // Skip own messages
 
-        // Deduplicate - Baileys can fire the same message multiple times
+        // Deduplicate by message ID
         const msgId = message.key.id;
         if (msgId && this.processedMessages.has(msgId)) {
-          logger.info(`Skipping duplicate message: ${msgId}`);
+          logger.info(`Skipping duplicate message (same ID): ${msgId}`);
           continue;
         }
         if (msgId) {
           this.processedMessages.add(msgId);
-          // Prevent memory leak - trim cache when too large
           if (this.processedMessages.size > this.MAX_PROCESSED_CACHE) {
             const first = this.processedMessages.values().next().value;
             if (first) this.processedMessages.delete(first);
+          }
+        }
+
+        // Deduplicate by jid+text within time window (catches Bad MAC retries with new IDs)
+        const text = message.message?.conversation
+          || message.message?.extendedTextMessage?.text
+          || message.message?.imageMessage?.caption
+          || '';
+        const jid = message.key.remoteJid || '';
+        const dedupKey = `${jid}:${text}`;
+        const now = Date.now();
+        const lastSeen = this.recentMessages.get(dedupKey);
+        if (lastSeen && now - lastSeen < this.DEDUP_WINDOW_MS) {
+          logger.info(`Skipping duplicate message (same text within ${this.DEDUP_WINDOW_MS}ms): ${msgId}`);
+          continue;
+        }
+        if (text) {
+          this.recentMessages.set(dedupKey, now);
+          // Clean old entries
+          for (const [key, ts] of this.recentMessages) {
+            if (now - ts > this.DEDUP_WINDOW_MS) this.recentMessages.delete(key);
           }
         }
 
