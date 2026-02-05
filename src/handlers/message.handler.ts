@@ -22,20 +22,13 @@ export class MessageHandler {
     const jid = message.key.remoteJid;
     if (!jid) return;
 
-    // Update display_name from pushName as early as possible (before any early returns)
-    logger.info(`DEBUG pushName: "${message.pushName}" for ${jid}`);
-    if (message.pushName) {
-      const isGroupChat = jid.endsWith('@g.us');
-      const chatJid = isGroupChat ? jid : jid;
-      // For DMs: save the sender's pushName as the chat display name
-      // For groups: skip (group names come from group metadata, not pushName)
-      if (!isGroupChat) {
-        const existingConfig = this.botControl.getChatConfig(chatJid);
-        logger.info(`DEBUG existingConfig for ${chatJid}: found=${!!existingConfig}, display_name="${existingConfig?.display_name}"`);
-        if (existingConfig && !existingConfig.display_name) {
-          this.botControl.updateChat(chatJid, { display_name: message.pushName });
-          logger.info(`Saved display_name "${message.pushName}" for ${chatJid}`);
-        }
+    // Update display_name from pushName for DM chats
+    if (message.pushName && !jid.endsWith('@g.us')) {
+      const existingConfig = this.botControl.getChatConfig(jid);
+      const nameIsMissing = !existingConfig?.display_name || existingConfig.display_name === jid;
+      if (existingConfig && nameIsMissing) {
+        this.botControl.updateChat(jid, { display_name: message.pushName });
+        logger.info(`Saved display_name "${message.pushName}" for ${jid}`);
       }
     }
 

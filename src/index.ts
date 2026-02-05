@@ -91,7 +91,8 @@ async function main() {
       for (const contact of contacts) {
         if (contact.notify && contact.id) {
           const existingConfig = botControl.getChatConfig(contact.id);
-          if (existingConfig && !existingConfig.display_name) {
+          const nameIsMissing = !existingConfig?.display_name || existingConfig.display_name === contact.id;
+          if (existingConfig && nameIsMissing) {
             botControl.updateChat(contact.id, { display_name: contact.notify });
             logger.info(`Saved display_name "${contact.notify}" for ${contact.id} (from contacts event)`);
           }

@@ -286,7 +286,7 @@ function Whitelist() {
     try {
       await api.post('/bot-control/chats', {
         jid: jid,
-        display_name: manualName.trim() || jid,
+        display_name: manualName.trim() || null,
         is_group: false,
         enabled: true,
         ai_mode: 'on',
@@ -579,7 +579,7 @@ function ActivityLog() {
     try {
       await api.post('/bot-control/chats', {
         jid: jid,
-        display_name: jid,
+        display_name: null,
         is_group: isGroup,
         enabled: true,
         ai_mode: 'on',
