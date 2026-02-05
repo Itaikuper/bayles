@@ -18,6 +18,13 @@ export class MessageHandler {
     const jid = message.key.remoteJid;
     if (!jid) return;
 
+    // Handle voice/audio messages
+    const audioMessage = message.message?.audioMessage;
+    if (audioMessage) {
+      await this.handleAudioMessage(message, jid, audioMessage);
+      return;
+    }
+
     const text = this.extractText(message);
     if (!text) return;
 
@@ -134,8 +141,72 @@ export class MessageHandler {
     );
   }
 
+  private async handleAudioMessage(
+    message: proto.IWebMessageInfo,
+    jid: string,
+    audioMessage: proto.Message.IAudioMessage
+  ): Promise<void> {
+    const isGroup = jid.endsWith('@g.us');
+    const sender = isGroup ? message.key.participant : jid;
+
+    logger.info(`Voice message from ${sender} in ${isGroup ? 'group' : 'DM'} (${audioMessage.seconds || '?'}s)`);
+
+    // In groups, voice messages only processed if reply-to-bot
+    if (isGroup && !this.isReplyToBotMessage(message)) {
+      return;
+    }
+
+    const decision = this.botControl.shouldRespondToMessage(jid, isGroup);
+
+    this.botControl.logActivity(
+      jid,
+      sender || undefined,
+      '[הודעה קולית]',
+      isGroup,
+      decision.shouldRespond ? 'responded' : 'ignored',
+      decision.reason
+    );
+
+    if (!decision.shouldRespond) {
+      logger.info(`Not responding to voice message: ${decision.reason}`);
+      return;
+    }
+
+    if (decision.responseType === 'auto_reply' && decision.autoReplyMessage) {
+      await this.whatsapp.sendReply(jid, decision.autoReplyMessage, message);
+      return;
+    }
+
+    try {
+      const audioBuffer = await this.whatsapp.downloadAudio(audioMessage);
+      const mimeType = audioMessage.mimetype || 'audio/ogg; codecs=opus';
+
+      const contextPrefix = isGroup && message.pushName
+        ? `[${message.pushName}]`
+        : undefined;
+
+      const response = await this.gemini.generateAudioResponse(
+        jid,
+        audioBuffer,
+        mimeType,
+        decision.customPrompt,
+        contextPrefix
+      );
+      await this.whatsapp.sendReply(jid, response, message);
+    } catch (error) {
+      logger.error('Error processing voice message:', error);
+      await this.whatsapp.sendReply(
+        jid,
+        'סליחה, לא הצלחתי לעבד את ההודעה הקולית. נסה שוב.',
+        message
+      );
+    }
+  }
+
   private isReplyToBotMessage(message: proto.IWebMessageInfo): boolean {
-    const contextInfo = message.message?.extendedTextMessage?.contextInfo;
+    const contextInfo =
+      message.message?.extendedTextMessage?.contextInfo
+      || message.message?.audioMessage?.contextInfo;
     if (!contextInfo?.participant) return false;
 
     const botJid = this.whatsapp.getBotJid();
@@ -148,7 +219,9 @@ export class MessageHandler {
   }
 
   private isMentioningBot(message: proto.IWebMessageInfo): boolean {
-    const contextInfo = message.message?.extendedTextMessage?.contextInfo;
+    const contextInfo =
+      message.message?.extendedTextMessage?.contextInfo
+      || message.message?.audioMessage?.contextInfo;
     const mentionedJids = contextInfo?.mentionedJid;
     if (!mentionedJids || mentionedJids.length === 0) return false;
 

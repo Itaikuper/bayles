@@ -68,6 +68,70 @@ export class GeminiService {
     }
   }
 
+  async generateAudioResponse(
+    jid: string,
+    audioBuffer: Buffer,
+    mimeType: string,
+    customPrompt?: string,
+    contextPrefix?: string
+  ): Promise<string> {
+    try {
+      const history = this.conversationHistory.get(jid) || [];
+      const systemPrompt = customPrompt || config.systemPrompt;
+
+      const chat = this.ai.chats.create({
+        model: config.geminiModel,
+        config: {
+          tools: [{ googleSearch: {} }],
+        },
+        history: [
+          {
+            role: 'user',
+            parts: [{ text: `System instruction: ${systemPrompt}` }],
+          },
+          {
+            role: 'model',
+            parts: [{ text: 'Understood. I will follow these instructions.' }],
+          },
+          ...history,
+        ],
+      });
+
+      const base64Audio = audioBuffer.toString('base64');
+      const textPrompt = contextPrefix
+        ? `${contextPrefix} The user sent a voice message. Listen to it and respond appropriately.`
+        : 'The user sent a voice message. Listen to it and respond appropriately.';
+
+      const response = await chat.sendMessage({
+        message: [
+          { inlineData: { mimeType, data: base64Audio } },
+          textPrompt,
+        ],
+      });
+
+      const responseText = response.text || 'Sorry, I could not understand the voice message.';
+
+      // Store text placeholder in history (not the audio blob)
+      const historyLabel = contextPrefix
+        ? `${contextPrefix} [הודעה קולית]`
+        : '[הודעה קולית]';
+      history.push(
+        { role: 'user', parts: [{ text: historyLabel }] },
+        { role: 'model', parts: [{ text: responseText }] }
+      );
+
+      while (history.length > this.maxHistoryLength * 2) {
+        history.shift();
+      }
+
+      this.conversationHistory.set(jid, history);
+      return responseText;
+    } catch (error) {
+      logger.error('Gemini audio API error:', error);
+      return 'Sorry, I encountered an error processing the voice message.';
+    }
+  }
+
   async generateImage(prompt: string): Promise<{ image: Buffer; text?: string } | null> {
     try {
       const response = await this.ai.models.generateContent({
