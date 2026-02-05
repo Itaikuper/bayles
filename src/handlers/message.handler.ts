@@ -3,6 +3,7 @@ import { WhatsAppService } from '../services/whatsapp.service.js';
 import { GeminiService } from '../services/gemini.service.js';
 import { SchedulerService } from '../services/scheduler.service.js';
 import { BotControlService } from '../services/bot-control.service.js';
+import { BirthdayService } from '../services/birthday.service.js';
 import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 
@@ -11,7 +12,8 @@ export class MessageHandler {
     private whatsapp: WhatsAppService,
     private gemini: GeminiService,
     private scheduler: SchedulerService,
-    private botControl: BotControlService
+    private botControl: BotControlService,
+    private birthdayService: BirthdayService
   ) {}
 
   async handle(message: proto.IWebMessageInfo): Promise<void> {
@@ -48,10 +50,15 @@ export class MessageHandler {
     logger.info(`DEBUG - Mentioned JIDs: ${JSON.stringify(contextInfo?.mentionedJid)}`);
     logger.info(`DEBUG - isReplyToBot: ${isReplyToBot}, isMentioningBot: ${isMentioningBot}, hasPrefix: ${hasPrefix}`);
 
-    // Remove prefix if present
-    const cleanText = hasPrefix
+    // Remove prefix or bot mention from text
+    let cleanText = hasPrefix
       ? text.slice(config.botPrefix.length).trim()
       : text;
+
+    // Strip bot mention (@<jid-number>) from beginning of message in groups
+    if (isGroup && isMentioningBot) {
+      cleanText = cleanText.replace(/^@\d+\s*/, '').trim();
+    }
 
     // For groups: respond only if has prefix OR is a reply to bot OR mentions bot
     if (isGroup && !hasPrefix && !isReplyToBot && !isMentioningBot) {
@@ -272,6 +279,10 @@ export class MessageHandler {
         await this.handleImageGeneration(jid, args.join(' '), originalMessage);
         break;
 
+      case 'birthdays':
+        await this.handleBirthdaysCommand(jid, args, originalMessage);
+        break;
+
       default:
         await this.whatsapp.sendReply(
           jid,
@@ -389,6 +400,131 @@ export class MessageHandler {
     );
   }
 
+  private async handleBirthdaysCommand(
+    jid: string,
+    args: string[],
+    originalMessage: proto.IWebMessageInfo
+  ): Promise<void> {
+    const subCommand = args[0]?.toLowerCase();
+
+    // /birthdays - show help
+    if (!subCommand) {
+      await this.whatsapp.sendReply(
+        jid,
+        `*ניהול ימי הולדת 🎂*
+
+*הוספת רשימה:*
+/birthdays add <רשימה>
+דוגמה: /birthdays add איתי 5 פבר יהודה 25 מרץ שרה 15/12
+
+*הצגת רשימה:*
+/birthdays list
+
+*מחיקה:*
+/birthdays delete <מספר>
+
+הבוט ישלח ברכה אוטומטית בכל יום הולדת ב-8:00 בבוקר!`,
+        originalMessage
+      );
+      return;
+    }
+
+    if (subCommand === 'add') {
+      const listText = args.slice(1).join(' ');
+      if (!listText.trim()) {
+        await this.whatsapp.sendReply(
+          jid,
+          'אנא ציין רשימת ימי הולדת.\nדוגמה: /birthdays add איתי 5 פבר יהודה 25 מרץ',
+          originalMessage
+        );
+        return;
+      }
+
+      try {
+        await this.whatsapp.sendReply(jid, 'מעבד את הרשימה...', originalMessage);
+
+        const parsed = await this.birthdayService.parseBirthdayList(jid, listText);
+        const ids = this.birthdayService.addBirthdays(parsed);
+
+        const monthNames = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
+          'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+
+        const summary = parsed.map((b, i) =>
+          `${i + 1}. ${b.person_name} - ${b.birth_day} ${monthNames[b.birth_month - 1]}`
+        ).join('\n');
+
+        await this.whatsapp.sendReply(
+          jid,
+          `נוספו ${ids.length} ימי הולדת:\n\n${summary}\n\nאשלח ברכות אוטומטית בכל יום הולדת ב-8:00!`,
+          originalMessage
+        );
+      } catch (error) {
+        logger.error('Failed to add birthdays:', error);
+        await this.whatsapp.sendReply(
+          jid,
+          `שגיאה: ${error instanceof Error ? error.message : 'לא הצלחתי להוסיף את ימי ההולדת'}`,
+          originalMessage
+        );
+      }
+      return;
+    }
+
+    if (subCommand === 'list') {
+      const birthdays = this.birthdayService.getBirthdaysByJid(jid);
+
+      if (birthdays.length === 0) {
+        await this.whatsapp.sendReply(
+          jid,
+          'אין ימי הולדת שמורים עדיין.\nהוסף עם: /birthdays add <רשימה>',
+          originalMessage
+        );
+        return;
+      }
+
+      const monthNames = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
+        'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+
+      const list = birthdays.map((b, i) =>
+        `${i + 1}. ${b.person_name} - ${b.birth_day} ${monthNames[b.birth_month - 1]} (ID: ${b.id})`
+      ).join('\n');
+
+      await this.whatsapp.sendReply(
+        jid,
+        `*ימי הולדת שמורים 🎂*\n\n${list}\n\nמחק עם: /birthdays delete <ID>`,
+        originalMessage
+      );
+      return;
+    }
+
+    if (subCommand === 'delete') {
+      const idStr = args[1];
+      if (!idStr) {
+        await this.whatsapp.sendReply(jid, 'ציין ID למחיקה. דוגמה: /birthdays delete 5', originalMessage);
+        return;
+      }
+
+      const id = parseInt(idStr);
+      if (isNaN(id)) {
+        await this.whatsapp.sendReply(jid, 'ID לא תקין', originalMessage);
+        return;
+      }
+
+      const deleted = this.birthdayService.deleteBirthday(id);
+      if (deleted) {
+        await this.whatsapp.sendReply(jid, 'יום ההולדת נמחק', originalMessage);
+      } else {
+        await this.whatsapp.sendReply(jid, 'לא נמצא יום הולדת עם ID זה', originalMessage);
+      }
+      return;
+    }
+
+    await this.whatsapp.sendReply(
+      jid,
+      `פקודה לא מוכרת: ${subCommand}\nכתוב /birthdays לעזרה`,
+      originalMessage
+    );
+  }
+
   private extractImagePrompt(text: string): string | null {
     const lower = text.toLowerCase();
 
@@ -470,6 +606,12 @@ ${config.botPrefix} <your message>
 /image <description> - Generate an image
 Or: "ייצר תמונה של..." / "תצייר..."
 
+*Birthday Reminders:*
+/birthdays - Manage birthdays
+/birthdays add <list> - Add birthdays
+/birthdays list - Show saved birthdays
+/birthdays delete <id> - Remove birthday
+
 *Commands:*
 /help - Show this help message
 /clear - Clear conversation history
@@ -483,6 +625,6 @@ ${config.botPrefix} What's the weather like?
 ${config.botPrefix} Tell me a joke
 /image a cat sitting on the moon
 ייצר תמונה של חתול על הירח
-/schedule 123@g.us "0 9 * * *" Good morning!`;
+/birthdays add איתי 5 פבר יהודה 25 מרץ`;
   }
 }
