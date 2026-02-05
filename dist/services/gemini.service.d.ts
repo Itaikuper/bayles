@@ -1,0 +1,22 @@
+export declare class GeminiService {
+    private ai;
+    private conversationHistory;
+    private maxHistoryLength;
+    constructor();
+    private getImageInstructions;
+    generateResponse(jid: string, userMessage: string, customPrompt?: string): Promise<string>;
+    generateAudioResponse(jid: string, audioBuffer: Buffer, mimeType: string, customPrompt?: string, contextPrefix?: string): Promise<string>;
+    generateDocumentAnalysisResponse(jid: string, mediaBuffer: Buffer, mimeType: string, caption?: string, customPrompt?: string, contextPrefix?: string, fileName?: string): Promise<string>;
+    generateImage(prompt: string, pro?: boolean): Promise<{
+        image: Buffer;
+        text?: string;
+    } | null>;
+    generateSpeech(text: string): Promise<Buffer>;
+    private convertPcmToOgg;
+    clearHistory(jid: string): void;
+    clearAllHistory(): void;
+    listConversations(): {
+        jid: string;
+        messageCount: number;
+    }[];
+}

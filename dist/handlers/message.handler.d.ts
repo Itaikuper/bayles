@@ -1,0 +1,33 @@
+import { proto } from '@whiskeysockets/baileys';
+import { WhatsAppService } from '../services/whatsapp.service.js';
+import { GeminiService } from '../services/gemini.service.js';
+import { SchedulerService } from '../services/scheduler.service.js';
+import { BotControlService } from '../services/bot-control.service.js';
+import { BirthdayService } from '../services/birthday.service.js';
+export declare class MessageHandler {
+    private whatsapp;
+    private gemini;
+    private scheduler;
+    private botControl;
+    private birthdayService;
+    private voiceModeJids;
+    constructor(whatsapp: WhatsAppService, gemini: GeminiService, scheduler: SchedulerService, botControl: BotControlService, birthdayService: BirthdayService);
+    handle(message: proto.IWebMessageInfo): Promise<void>;
+    private extractText;
+    private handleAudioMessage;
+    private handleImageMessage;
+    private handleDocumentMessage;
+    private parseImageTags;
+    private sendResponseWithImages;
+    private sendResponse;
+    private isReplyToBotMessage;
+    private isMentioningBot;
+    private handleCommand;
+    private handleGroupsCommand;
+    private handleScheduleCommand;
+    private handleListScheduledCommand;
+    private handleBirthdaysCommand;
+    private extractImagePrompt;
+    private handleImageGeneration;
+    private getHelpText;
+}

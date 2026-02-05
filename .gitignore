@@ -1,8 +1,7 @@
 # Dependencies
 node_modules/
 
-# Build output
-dist/
+# Build output (committed for deploy - no tsc on server)
 
 # WhatsApp auth state
 auth_info/
