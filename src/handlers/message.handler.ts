@@ -435,8 +435,9 @@ export class MessageHandler {
     if (config.autoImageGeneration && parsed.imagePrompts.length > 0) {
       for (const { prompt, pro } of parsed.imagePrompts.slice(0, 2)) {
         try {
+          const fullPrompt = `${prompt}. If you include a text caption, write it in Hebrew.`;
           logger.info(`Auto-generating ${pro ? 'PRO ' : ''}image: "${prompt.substring(0, 80)}..."`);
-          const result = await this.gemini.generateImage(prompt, pro);
+          const result = await this.gemini.generateImage(fullPrompt, pro);
           if (result) {
             await this.whatsapp.sendImageReply(jid, result.image, result.text || '', message);
           }
