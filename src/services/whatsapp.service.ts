@@ -14,14 +14,15 @@ export class WhatsAppService {
   private sock: WASocket | null = null;
   private messageHandler: ((message: proto.IWebMessageInfo) => Promise<void>) | null = null;
   private processedMessages: Set<string> = new Set();
-  private recentMessages: Map<string, number> = new Map(); // text -> timestamp
+  private recentMessages: Map<string, number> = new Map();
+  private processingJids: Set<string> = new Set(); // Per-JID lock
+  private cleanupEvProcess: (() => void) | null = null;
   private readonly MAX_PROCESSED_CACHE = 1000;
-  private readonly DEDUP_WINDOW_MS = 10_000; // 10 second cooldown per text
+  private readonly DEDUP_WINDOW_MS = 10_000;
   private isConnecting: boolean = false;
   private connectionGeneration: number = 0;
 
   async connect(): Promise<WASocket> {
-    // Guard against concurrent reconnection attempts
     if (this.isConnecting) {
       logger.warn('Connection attempt already in progress, skipping');
       return this.sock!;
@@ -34,12 +35,16 @@ export class WhatsAppService {
       const { state, saveCreds } = await useMultiFileAuthState(config.authDir);
       const { version } = await fetchLatestBaileysVersion();
 
-      logger.info(`Using Baileys version: ${version.join('.')}`);
+      logger.info(`Baileys v${version.join('.')} | WhatsApp service v3 (ev.process + jid-lock)`);
 
-      // Clean up old socket listeners before creating new one
+      // Clean up old socket before creating new one
       if (this.sock) {
         logger.info('Cleaning up previous socket before reconnection');
         try {
+          if (this.cleanupEvProcess) {
+            this.cleanupEvProcess();
+            this.cleanupEvProcess = null;
+          }
           this.sock.ev.removeAllListeners('connection.update');
           this.sock.ev.removeAllListeners('creds.update');
           this.sock.ev.removeAllListeners('messages.upsert');
@@ -56,99 +61,102 @@ export class WhatsAppService {
         syncFullHistory: false,
       });
 
-      // Handle connection updates
-      this.sock.ev.on('connection.update', async (update) => {
+      // Use ev.process for batched event handling (Baileys best practice)
+      // Events are batched and processed in a single serialized callback
+      this.cleanupEvProcess = this.sock.ev.process(async (events) => {
         // Ignore events from stale sockets
-        if (myGeneration !== this.connectionGeneration) {
-          logger.info(`Ignoring connection.update from stale socket (gen ${myGeneration}, current ${this.connectionGeneration})`);
-          return;
-        }
+        if (myGeneration !== this.connectionGeneration) return;
 
-        const { connection, lastDisconnect, qr } = update;
+        // --- Connection updates ---
+        if (events['connection.update']) {
+          const { connection, lastDisconnect, qr } = events['connection.update'];
 
-        if (qr) {
-          logger.info('QR Code generated - scan with WhatsApp on your phone:');
-          qrcode.generate(qr, { small: true });
-        }
-
-        if (connection === 'close') {
-          const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-          const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-
-          logger.warn(
-            `Connection closed. Status: ${statusCode}. Reconnecting: ${shouldReconnect}`
-          );
-
-          if (shouldReconnect) {
-            await this.connect();
-          } else {
-            logger.error('Logged out. Please delete auth_info folder and restart.');
-            process.exit(1);
+          if (qr) {
+            logger.info('QR Code generated - scan with WhatsApp:');
+            qrcode.generate(qr, { small: true });
           }
-        }
 
-        if (connection === 'open') {
-          logger.info('Connected to WhatsApp successfully!');
-        }
-      });
+          if (connection === 'close') {
+            const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+            logger.warn(`Connection closed. Status: ${statusCode}. Reconnecting: ${shouldReconnect}`);
 
-      // Save credentials on update
-      this.sock.ev.on('creds.update', saveCreds);
-
-      // Handle incoming messages
-      this.sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        if (type !== 'notify') return;
-
-        // Ignore events from stale sockets
-        if (myGeneration !== this.connectionGeneration) {
-          logger.info(`Ignoring messages.upsert from stale socket (gen ${myGeneration}, current ${this.connectionGeneration})`);
-          return;
-        }
-
-        for (const message of messages) {
-          if (message.key.fromMe) continue; // Skip own messages
-
-          // Deduplicate by message ID
-          const msgId = message.key.id;
-          if (msgId && this.processedMessages.has(msgId)) {
-            logger.info(`Skipping duplicate message (same ID): ${msgId}`);
-            continue;
-          }
-          if (msgId) {
-            this.processedMessages.add(msgId);
-            if (this.processedMessages.size > this.MAX_PROCESSED_CACHE) {
-              const first = this.processedMessages.values().next().value;
-              if (first) this.processedMessages.delete(first);
+            if (shouldReconnect) {
+              await this.connect();
+            } else {
+              logger.error('Logged out. Please delete auth_info folder and restart.');
+              process.exit(1);
             }
           }
 
-          // Deduplicate by text within time window (catches Bad MAC retries with new IDs
-          // and same message arriving via different JID formats: phone vs LID)
-          const text = message.message?.conversation
-            || message.message?.extendedTextMessage?.text
-            || message.message?.imageMessage?.caption
-            || '';
-          const jid = message.key.remoteJid || '';
-          // For DMs: use text-only key (same person may appear as different JID formats)
-          // For groups: include group JID to avoid cross-group false positives
-          const isDM = !jid.endsWith('@g.us');
-          const dedupKey = isDM ? `dm:${text}` : `${jid}:${text}`;
-          const now = Date.now();
-          const lastSeen = this.recentMessages.get(dedupKey);
-          if (lastSeen && now - lastSeen < this.DEDUP_WINDOW_MS) {
-            logger.info(`Skipping duplicate message (same text within ${this.DEDUP_WINDOW_MS}ms): ${msgId}`);
-            continue;
+          if (connection === 'open') {
+            logger.info('Connected to WhatsApp successfully!');
           }
-          if (text) {
-            this.recentMessages.set(dedupKey, now);
-            // Clean old entries
-            for (const [key, ts] of this.recentMessages) {
-              if (now - ts > this.DEDUP_WINDOW_MS) this.recentMessages.delete(key);
-            }
-          }
+        }
 
-          if (this.messageHandler) {
-            await this.messageHandler(message);
+        // --- Credentials ---
+        if (events['creds.update']) {
+          await saveCreds();
+        }
+
+        // --- Incoming messages ---
+        if (events['messages.upsert']) {
+          const { messages, type } = events['messages.upsert'];
+          if (type !== 'notify') return;
+
+          for (const message of messages) {
+            if (message.key.fromMe) continue;
+
+            const msgId = message.key.id;
+            const jid = message.key.remoteJid || '';
+            const text = message.message?.conversation
+              || message.message?.extendedTextMessage?.text
+              || message.message?.imageMessage?.caption
+              || '';
+
+            // Layer 1: Message ID dedup
+            if (msgId && this.processedMessages.has(msgId)) {
+              logger.info(`[dedup:id] Skip ${msgId}`);
+              continue;
+            }
+            if (msgId) {
+              this.processedMessages.add(msgId);
+              if (this.processedMessages.size > this.MAX_PROCESSED_CACHE) {
+                const first = this.processedMessages.values().next().value;
+                if (first) this.processedMessages.delete(first);
+              }
+            }
+
+            // Layer 2: Text-based dedup (10s window, JID-agnostic for DMs)
+            const isDM = !jid.endsWith('@g.us');
+            const dedupKey = isDM ? `dm:${text}` : `${jid}:${text}`;
+            const now = Date.now();
+            const lastSeen = this.recentMessages.get(dedupKey);
+            if (lastSeen && now - lastSeen < this.DEDUP_WINDOW_MS) {
+              logger.info(`[dedup:text] Skip ${msgId} (same text within ${this.DEDUP_WINDOW_MS}ms)`);
+              continue;
+            }
+            if (text) {
+              this.recentMessages.set(dedupKey, now);
+              for (const [key, ts] of this.recentMessages) {
+                if (now - ts > this.DEDUP_WINDOW_MS) this.recentMessages.delete(key);
+              }
+            }
+
+            // Layer 3: Per-JID processing lock
+            if (this.processingJids.has(jid)) {
+              logger.info(`[dedup:lock] Skip ${msgId} - already processing for ${jid}`);
+              continue;
+            }
+
+            this.processingJids.add(jid);
+            try {
+              if (this.messageHandler) {
+                await this.messageHandler(message);
+              }
+            } finally {
+              this.processingJids.delete(jid);
+            }
           }
         }
       });
@@ -241,12 +249,10 @@ export class WhatsAppService {
 
   getBotJid(): string | null {
     if (!this.sock?.user?.id) return null;
-    // Normalize JID format (remove :0 suffix if present)
     return this.sock.user.id.replace(/:.*@/, '@');
   }
 
   getBotLid(): string | null {
-    // Get the LID (Linked Identity) format of the bot's JID
     const user = this.sock?.user as { lid?: string } | undefined;
     if (!user?.lid) return null;
     return user.lid.replace(/:.*@/, '@');
