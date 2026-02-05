@@ -61,7 +61,7 @@ export class MessageHandler {
     }
 
     // Check if message contains trigger words (פרופסור / בוט)
-    const hasTriggerWord = /\bפרופסור\b|\bבוט\b/i.test(text);
+    const hasTriggerWord = /(?:^|[\s,.!?])(?:פרופסור|בוט)(?:[\s,.!?]|$)/.test(text);
 
     // For groups: respond only if has prefix OR is a reply to bot OR mentions bot OR has trigger word
     if (isGroup && !hasPrefix && !isReplyToBot && !isMentioningBot && !hasTriggerWord) {
