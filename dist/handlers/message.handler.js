@@ -18,6 +18,20 @@ export class MessageHandler {
         const jid = message.key.remoteJid;
         if (!jid)
             return;
+        // Update display_name from pushName as early as possible (before any early returns)
+        if (message.pushName) {
+            const isGroupChat = jid.endsWith('@g.us');
+            const chatJid = isGroupChat ? jid : jid;
+            // For DMs: save the sender's pushName as the chat display name
+            // For groups: skip (group names come from group metadata, not pushName)
+            if (!isGroupChat) {
+                const existingConfig = this.botControl.getChatConfig(chatJid);
+                if (existingConfig && !existingConfig.display_name) {
+                    this.botControl.updateChat(chatJid, { display_name: message.pushName });
+                    logger.info(`Saved display_name "${message.pushName}" for ${chatJid}`);
+                }
+            }
+        }
         // Debug: log which message types are present
         const msg = message.message;
         const msgTypes = msg ? Object.keys(msg).filter(k => msg[k] != null) : [];
@@ -46,14 +60,6 @@ export class MessageHandler {
         const isGroup = jid.endsWith('@g.us');
         const sender = isGroup ? message.key.participant : jid;
         logger.info(`Message from ${sender} in ${isGroup ? 'group' : 'DM'}: ${text}`);
-        // Update display_name from pushName if missing
-        if (message.pushName) {
-            const chatJid = isGroup ? jid : (sender || jid);
-            const config = this.botControl.getChatConfig(chatJid);
-            if (config && !config.display_name) {
-                this.botControl.updateChat(chatJid, { display_name: message.pushName });
-            }
-        }
         // For groups, check if message starts with prefix
         const hasPrefix = text.startsWith(config.botPrefix);
         // Check if the message is a reply to the bot or mentions the bot
