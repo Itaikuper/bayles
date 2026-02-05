@@ -68,6 +68,11 @@ export class MessageHandler {
       return;
     }
 
+    // Strip trigger word from beginning of message
+    if (hasTriggerWord) {
+      cleanText = cleanText.replace(/^(?:פרופסור|בוט)[,\s]*/, '').trim();
+    }
+
     // Get decision from bot control service
     const decision = this.botControl.shouldRespondToMessage(jid, isGroup);
 
