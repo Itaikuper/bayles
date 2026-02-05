@@ -20,6 +20,11 @@ export class MessageHandler {
     const jid = message.key.remoteJid;
     if (!jid) return;
 
+    // Debug: log which message types are present
+    const msg = message.message;
+    const msgTypes = msg ? Object.keys(msg).filter(k => msg[k as keyof typeof msg] != null) : [];
+    logger.info(`DEBUG msgTypes: ${JSON.stringify(msgTypes)} from ${message.key.participant || jid}`);
+
     // Handle voice/audio messages
     const audioMessage = message.message?.audioMessage;
     if (audioMessage) {
@@ -354,6 +359,7 @@ export class MessageHandler {
     try {
       const docBuffer = await this.whatsapp.downloadDocument(documentMessage);
       const mimeType = documentMessage.mimetype || 'application/pdf';
+      logger.info(`DEBUG doc download: ${docBuffer.length} bytes, mime: ${mimeType}, file: ${fileName}`);
 
       const contextPrefix = isGroup && message.pushName
         ? `[${message.pushName}]`
