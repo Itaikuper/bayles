@@ -73,11 +73,11 @@ export class GeminiService {
   }
 
   private buildTools(): any[] {
-    const tools: any[] = [{ googleSearch: {} }];
+    // googleSearch and functionDeclarations cannot be combined in the same request
     if (this.calendarService) {
-      tools.push({ functionDeclarations: calendarFunctionDeclarations });
+      return [{ functionDeclarations: calendarFunctionDeclarations }];
     }
-    return tools;
+    return [{ googleSearch: {} }];
   }
 
   private async executeFunctionCalls(
