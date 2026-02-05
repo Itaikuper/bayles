@@ -27,6 +27,20 @@ export class MessageHandler {
       return;
     }
 
+    // Handle image messages (photos from camera/gallery)
+    const imageMessage = message.message?.imageMessage;
+    if (imageMessage) {
+      await this.handleImageMessage(message, jid, imageMessage);
+      return;
+    }
+
+    // Handle document messages (PDF, DOC, etc.)
+    const documentMessage = message.message?.documentMessage;
+    if (documentMessage) {
+      await this.handleDocumentMessage(message, jid, documentMessage);
+      return;
+    }
+
     const text = this.extractText(message);
     if (!text) return;
 
@@ -150,7 +164,6 @@ export class MessageHandler {
     return (
       msg.conversation ||
       msg.extendedTextMessage?.text ||
-      msg.imageMessage?.caption ||
       msg.videoMessage?.caption ||
       null
     );
@@ -218,10 +231,151 @@ export class MessageHandler {
     }
   }
 
+  private async handleImageMessage(
+    message: proto.IWebMessageInfo,
+    jid: string,
+    imageMessage: proto.Message.IImageMessage
+  ): Promise<void> {
+    const isGroup = jid.endsWith('@g.us');
+    const sender = isGroup ? message.key.participant : jid;
+    const caption = imageMessage.caption || '';
+
+    logger.info(`Image message from ${sender} in ${isGroup ? 'group' : 'DM'}${caption ? `: ${caption}` : ''}`);
+
+    // In groups: only respond if reply-to-bot or caption has trigger word
+    if (isGroup) {
+      const isReplyToBot = this.isReplyToBotMessage(message);
+      const hasTriggerWord = /(?:^|[\s,.!?])(?:פרופסור|בוט)(?:[\s,.!?]|$)/.test(caption);
+
+      if (!isReplyToBot && !hasTriggerWord) {
+        return;
+      }
+    }
+
+    const decision = this.botControl.shouldRespondToMessage(jid, isGroup);
+
+    this.botControl.logActivity(
+      jid,
+      sender || undefined,
+      caption ? `[תמונה] ${caption}` : '[תמונה]',
+      isGroup,
+      decision.shouldRespond ? 'responded' : 'ignored',
+      decision.reason
+    );
+
+    if (!decision.shouldRespond) {
+      logger.info(`Not responding to image: ${decision.reason}`);
+      return;
+    }
+
+    if (decision.responseType === 'auto_reply' && decision.autoReplyMessage) {
+      await this.whatsapp.sendReply(jid, decision.autoReplyMessage, message);
+      return;
+    }
+
+    try {
+      const imageBuffer = await this.whatsapp.downloadImage(imageMessage);
+      const mimeType = imageMessage.mimetype || 'image/jpeg';
+
+      const contextPrefix = isGroup && message.pushName
+        ? `[${message.pushName}]`
+        : undefined;
+
+      // Strip trigger words from caption
+      const cleanCaption = caption
+        ? caption.replace(/(?:^|[\s,.!?])(?:פרופסור|בוט)(?:[\s,.!?]|$)/g, ' ').trim()
+        : undefined;
+
+      const response = await this.gemini.generateDocumentAnalysisResponse(
+        jid,
+        imageBuffer,
+        mimeType,
+        cleanCaption || undefined,
+        decision.customPrompt,
+        contextPrefix
+      );
+      await this.whatsapp.sendReply(jid, response, message);
+    } catch (error) {
+      logger.error('Error processing image:', error);
+      await this.whatsapp.sendReply(
+        jid,
+        'סליחה, לא הצלחתי לעבד את התמונה. נסה שוב.',
+        message
+      );
+    }
+  }
+
+  private async handleDocumentMessage(
+    message: proto.IWebMessageInfo,
+    jid: string,
+    documentMessage: proto.Message.IDocumentMessage
+  ): Promise<void> {
+    const isGroup = jid.endsWith('@g.us');
+    const sender = isGroup ? message.key.participant : jid;
+    const fileName = documentMessage.fileName || 'document';
+
+    logger.info(`Document message from ${sender} in ${isGroup ? 'group' : 'DM'}: ${fileName}`);
+
+    // In groups: only respond if reply-to-bot
+    if (isGroup && !this.isReplyToBotMessage(message)) {
+      return;
+    }
+
+    const decision = this.botControl.shouldRespondToMessage(jid, isGroup);
+
+    this.botControl.logActivity(
+      jid,
+      sender || undefined,
+      `[קובץ: ${fileName}]`,
+      isGroup,
+      decision.shouldRespond ? 'responded' : 'ignored',
+      decision.reason
+    );
+
+    if (!decision.shouldRespond) {
+      logger.info(`Not responding to document: ${decision.reason}`);
+      return;
+    }
+
+    if (decision.responseType === 'auto_reply' && decision.autoReplyMessage) {
+      await this.whatsapp.sendReply(jid, decision.autoReplyMessage, message);
+      return;
+    }
+
+    try {
+      const docBuffer = await this.whatsapp.downloadDocument(documentMessage);
+      const mimeType = documentMessage.mimetype || 'application/pdf';
+
+      const contextPrefix = isGroup && message.pushName
+        ? `[${message.pushName}]`
+        : undefined;
+
+      const response = await this.gemini.generateDocumentAnalysisResponse(
+        jid,
+        docBuffer,
+        mimeType,
+        undefined,
+        decision.customPrompt,
+        contextPrefix,
+        fileName
+      );
+      await this.whatsapp.sendReply(jid, response, message);
+    } catch (error) {
+      logger.error('Error processing document:', error);
+      await this.whatsapp.sendReply(
+        jid,
+        'סליחה, לא הצלחתי לעבד את הקובץ. נסה שוב.',
+        message
+      );
+    }
+  }
+
   private isReplyToBotMessage(message: proto.IWebMessageInfo): boolean {
     const contextInfo =
       message.message?.extendedTextMessage?.contextInfo
-      || message.message?.audioMessage?.contextInfo;
+      || message.message?.audioMessage?.contextInfo
+      || message.message?.imageMessage?.contextInfo
+      || message.message?.documentMessage?.contextInfo;
     if (!contextInfo?.participant) return false;
 
     const botJid = this.whatsapp.getBotJid();
@@ -236,7 +390,9 @@ export class MessageHandler {
   private isMentioningBot(message: proto.IWebMessageInfo): boolean {
     const contextInfo =
       message.message?.extendedTextMessage?.contextInfo
-      || message.message?.audioMessage?.contextInfo;
+      || message.message?.audioMessage?.contextInfo
+      || message.message?.imageMessage?.contextInfo
+      || message.message?.documentMessage?.contextInfo;
     const mentionedJids = contextInfo?.mentionedJid;
     if (!mentionedJids || mentionedJids.length === 0) return false;
 
@@ -638,6 +794,13 @@ export class MessageHandler {
 
 *Chat with AI:*
 ${config.botPrefix} <your message>
+
+*כלי למידה:*
+שלח תמונה או קובץ (PDF, מסמך) ואעזור לך:
+- חזרה לקראת מבחן
+- עזרה בפתרון תרגיל
+- סיכום החומר
+- שאלות תרגול
 
 *Image Generation:*
 /image <description> - Generate an image

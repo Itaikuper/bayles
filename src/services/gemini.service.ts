@@ -132,6 +132,87 @@ export class GeminiService {
     }
   }
 
+  async generateDocumentAnalysisResponse(
+    jid: string,
+    mediaBuffer: Buffer,
+    mimeType: string,
+    caption?: string,
+    customPrompt?: string,
+    contextPrefix?: string,
+    fileName?: string
+  ): Promise<string> {
+    try {
+      const history = this.conversationHistory.get(jid) || [];
+      const systemPrompt = customPrompt || config.systemPrompt;
+
+      const chat = this.ai.chats.create({
+        model: config.geminiModel,
+        config: {
+          tools: [{ googleSearch: {} }],
+        },
+        history: [
+          {
+            role: 'user',
+            parts: [{ text: `System instruction: ${systemPrompt}` }],
+          },
+          {
+            role: 'model',
+            parts: [{ text: 'Understood. I will follow these instructions.' }],
+          },
+          ...history,
+        ],
+      });
+
+      const base64Media = mediaBuffer.toString('base64');
+
+      // If user sent a caption, use it as instruction; otherwise show learning menu
+      let textPrompt: string;
+      if (caption) {
+        const prefix = contextPrefix ? `${contextPrefix} ` : '';
+        textPrompt = `${prefix}המשתמש שלח תמונה/מסמך${fileName ? ` (${fileName})` : ''} עם ההוראה: "${caption}". נתח את התוכן ובצע את מה שהמשתמש מבקש.`;
+      } else {
+        const prefix = contextPrefix ? `${contextPrefix} ` : '';
+        textPrompt = `${prefix}המשתמש שלח תמונה/מסמך${fileName ? ` (${fileName})` : ''}. נתח את התוכן בקצרה והצג למשתמש את האפשרויות הבאות:
+
+1. 📚 חזרה לקראת מבחן - סיכום והדגשת נקודות מפתח
+2. ✏️ עזרה בפתרון תרגיל - הדרכה שלב אחר שלב
+3. 📝 סיכום החומר - תמצית קצרה ומסודרת
+4. ❓ שאלות תרגול - יצירת שאלות על החומר
+
+שאל את המשתמש מה הוא רוצה לעשות עם החומר.`;
+      }
+
+      const response = await chat.sendMessage({
+        message: [
+          { inlineData: { mimeType, data: base64Media } },
+          textPrompt,
+        ],
+      });
+
+      const responseText = response.text || 'סליחה, לא הצלחתי לנתח את המסמך.';
+
+      // Store text placeholder in history (not the media blob)
+      const mediaLabel = fileName ? `[קובץ: ${fileName}]` : '[תמונה]';
+      const historyText = caption
+        ? `${contextPrefix ? contextPrefix + ' ' : ''}${mediaLabel} ${caption}`
+        : `${contextPrefix ? contextPrefix + ' ' : ''}${mediaLabel}`;
+      history.push(
+        { role: 'user', parts: [{ text: historyText }] },
+        { role: 'model', parts: [{ text: responseText }] }
+      );
+
+      while (history.length > this.maxHistoryLength * 2) {
+        history.shift();
+      }
+
+      this.conversationHistory.set(jid, history);
+      return responseText;
+    } catch (error) {
+      logger.error('Gemini document analysis error:', error);
+      return 'סליחה, לא הצלחתי לנתח את המסמך. נסה שוב.';
+    }
+  }
+
   async generateImage(prompt: string, pro = false): Promise<{ image: Buffer; text?: string } | null> {
     try {
       const model = pro ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';

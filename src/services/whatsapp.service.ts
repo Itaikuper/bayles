@@ -251,6 +251,30 @@ export class WhatsAppService {
     return Buffer.concat(chunks);
   }
 
+  async downloadImage(imageMessage: proto.Message.IImageMessage): Promise<Buffer> {
+    const stream = await downloadContentFromMessage(
+      imageMessage as any,
+      'image'
+    );
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(chunk as Buffer);
+    }
+    return Buffer.concat(chunks);
+  }
+
+  async downloadDocument(documentMessage: proto.Message.IDocumentMessage): Promise<Buffer> {
+    const stream = await downloadContentFromMessage(
+      documentMessage as any,
+      'document'
+    );
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(chunk as Buffer);
+    }
+    return Buffer.concat(chunks);
+  }
+
   private getMimeType(filePath: string): string {
     const ext = filePath.split('.').pop()?.toLowerCase();
     const mimeTypes: Record<string, string> = {
