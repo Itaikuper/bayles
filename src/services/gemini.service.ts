@@ -167,7 +167,7 @@ export class GeminiService {
       return { image: imageBuffer, text };
     } catch (error) {
       logger.error('Gemini image generation error:', error);
-      return null;
+      throw error;
     }
   }
 
