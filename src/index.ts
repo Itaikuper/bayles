@@ -43,6 +43,49 @@ async function main() {
     // Initialize message handler
     const messageHandler = new MessageHandler(whatsapp, gemini, scheduler, botControl, birthdayService);
 
+    // Auto-whitelist family group members (group + private DMs)
+    let familyGroupJid: string | null = null;
+
+    const syncFamilyGroup = async () => {
+      try {
+        const groupName = config.familyGroupName;
+        if (!groupName) return;
+
+        logger.info(`Syncing family group members: "${groupName}"`);
+        familyGroupJid = await whatsapp.findGroupByName(groupName);
+        if (!familyGroupJid) {
+          logger.warn(`Family group "${groupName}" not found`);
+          return;
+        }
+
+        // Whitelist the group itself
+        botControl.ensureChatWhitelisted(familyGroupJid, groupName, true);
+
+        // Whitelist each member for private DMs
+        const participants = await whatsapp.getGroupParticipants(familyGroupJid);
+        let added = 0;
+        for (const p of participants) {
+          if (botControl.ensureChatWhitelisted(p.id)) added++;
+        }
+
+        logger.info(`Family group sync: ${added} new members whitelisted (${participants.length} total)`);
+      } catch (error) {
+        logger.error('Error syncing family group:', error);
+      }
+    };
+
+    whatsapp.onConnected(syncFamilyGroup);
+
+    whatsapp.onGroupParticipantsUpdate(async (groupJid, participants, action) => {
+      if (action !== 'add') return;
+      if (!familyGroupJid || groupJid !== familyGroupJid) return;
+
+      for (const jid of participants) {
+        botControl.ensureChatWhitelisted(jid);
+      }
+      logger.info(`Auto-whitelisted ${participants.length} new family group member(s)`);
+    });
+
     // Register message handler (async - awaited by WhatsApp service for serialized processing)
     whatsapp.onMessage(async (message) => {
       try {

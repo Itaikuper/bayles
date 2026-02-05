@@ -22,6 +22,8 @@ export class WhatsAppService {
   private readonly DEDUP_WINDOW_MS = 10_000;
   private isConnecting: boolean = false;
   private connectionGeneration: number = 0;
+  private onConnectedCallback: (() => Promise<void>) | null = null;
+  private onGroupParticipantsUpdateCallback: ((groupJid: string, participants: string[], action: string) => Promise<void>) | null = null;
 
   async connect(): Promise<WASocket> {
     if (this.isConnecting) {
@@ -92,12 +94,24 @@ export class WhatsAppService {
 
           if (connection === 'open') {
             logger.info('Connected to WhatsApp successfully!');
+            if (this.onConnectedCallback) {
+              this.onConnectedCallback().catch(err => logger.error('onConnected callback error:', err));
+            }
           }
         }
 
         // --- Credentials ---
         if (events['creds.update']) {
           await saveCreds();
+        }
+
+        // --- Group participants update ---
+        if (events['group-participants.update']) {
+          const update = events['group-participants.update'] as { id: string; participants: string[]; action: string };
+          if (this.onGroupParticipantsUpdateCallback) {
+            this.onGroupParticipantsUpdateCallback(update.id, update.participants, update.action)
+              .catch(err => logger.error('Group participants update callback error:', err));
+          }
         }
 
         // --- Incoming messages ---
@@ -292,6 +306,29 @@ export class WhatsAppService {
       mp3: 'audio/mpeg',
     };
     return mimeTypes[ext || ''] || 'application/octet-stream';
+  }
+
+  onConnected(callback: () => Promise<void>): void {
+    this.onConnectedCallback = callback;
+  }
+
+  onGroupParticipantsUpdate(callback: (groupJid: string, participants: string[], action: string) => Promise<void>): void {
+    this.onGroupParticipantsUpdateCallback = callback;
+  }
+
+  async findGroupByName(name: string): Promise<string | null> {
+    if (!this.sock) return null;
+    const groups = await this.sock.groupFetchAllParticipating();
+    for (const group of Object.values(groups)) {
+      if (group.subject === name) return group.id;
+    }
+    return null;
+  }
+
+  async getGroupParticipants(groupJid: string): Promise<{ id: string; admin?: string | null }[]> {
+    if (!this.sock) throw new Error('WhatsApp not connected');
+    const metadata = await this.sock.groupMetadata(groupJid);
+    return metadata.participants;
   }
 
   getSocket(): WASocket | null {

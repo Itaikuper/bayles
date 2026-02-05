@@ -13,6 +13,9 @@ export const config = {
   // Bot behavior
   botPrefix: process.env.BOT_PREFIX || '!ai',
 
+  // Family group auto-whitelist
+  familyGroupName: process.env.FAMILY_GROUP_NAME || 'משפחה לא בוחרים',
+
   // System prompt for AI
   systemPrompt:
     process.env.SYSTEM_PROMPT ||

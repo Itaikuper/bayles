@@ -195,6 +195,25 @@ export class BotControlService {
     logger.info(`Chat ${jid} ${enabled ? 'enabled' : 'disabled'}`);
   }
 
+  /**
+   * Auto-whitelist a chat if not already in the list.
+   * Returns true if a new entry was created.
+   */
+  ensureChatWhitelisted(jid: string, displayName?: string, isGroup?: boolean): boolean {
+    const existing = this.chatConfigRepo.getByJid(jid);
+    if (existing) return false;
+
+    this.chatConfigRepo.create({
+      jid,
+      display_name: displayName,
+      is_group: isGroup,
+      enabled: true,
+      ai_mode: 'on',
+    });
+    logger.info(`Auto-whitelisted: ${jid}${displayName ? ` (${displayName})` : ''}`);
+    return true;
+  }
+
   // ============== Activity Log ==============
 
   getActivityLog(limit?: number, offset?: number): ActivityLogEntry[] {
