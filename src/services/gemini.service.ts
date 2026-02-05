@@ -4,16 +4,24 @@ import { writeFileSync, readFileSync, unlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { config } from '../config/env.js';
+import { calendarFunctionDeclarations } from '../config/calendar-tools.js';
 import { logger } from '../utils/logger.js';
 import type { ChatHistory } from '../types/index.js';
+import type { CalendarService } from './calendar.service.js';
 
 export class GeminiService {
   private ai: GoogleGenAI;
   private conversationHistory: Map<string, ChatHistory[]> = new Map();
   private maxHistoryLength = 20; // Keep last 20 message pairs per conversation
+  private calendarService: CalendarService | null = null;
 
   constructor() {
     this.ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
+  }
+
+  setCalendarService(service: CalendarService): void {
+    this.calendarService = service;
+    logger.info('Calendar service connected to Gemini');
   }
 
   private getImageInstructions(): string {
@@ -44,19 +52,77 @@ export class GeminiService {
 4. מקסימום תגית אחת בתשובה.`;
   }
 
+  private getCalendarInstructions(): string {
+    if (!this.calendarService) return '';
+    return `
+
+יש לך גישה ליומן Google משפחתי. אתה יכול לנהל אירועים ביומן.
+
+יכולות:
+- יצירת אירוע חדש (calendar_create_event)
+- הצגת אירועים קרובים (calendar_list_events)
+- עדכון אירוע קיים (calendar_update_event) - חייב קודם להציג אירועים כדי לקבל event_id
+- מחיקת אירוע (calendar_delete_event) - חייב קודם להציג אירועים כדי לקבל event_id
+
+כללים:
+1. התאריך והשעה של היום: ${new Date().toISOString()}. השתמש בזה לחישוב "מחר", "יום שלישי הבא" וכו'.
+2. אם המשתמש לא מציין שעת סיום, קבע שעה אחת אחרי ההתחלה.
+3. אם המשתמש רוצה לעדכן או למחוק אירוע, קודם הצג את רשימת האירועים כדי למצוא את ה-event_id.
+4. תמיד ענה בעברית ואשר את הפעולה שביצעת.
+5. כשאתה מציג אירועים, הצג אותם בצורה ברורה עם תאריך, שעה, ומיקום.`;
+  }
+
+  private buildTools(): any[] {
+    const tools: any[] = [{ googleSearch: {} }];
+    if (this.calendarService) {
+      tools.push({ functionDeclarations: calendarFunctionDeclarations });
+    }
+    return tools;
+  }
+
+  private async executeFunctionCalls(
+    functionCalls: Array<{ name?: string; args?: Record<string, unknown> }>
+  ): Promise<any[]> {
+    const responses: any[] = [];
+    for (const fc of functionCalls) {
+      if (!fc.name || !this.calendarService) {
+        responses.push({
+          functionResponse: {
+            name: fc.name || 'unknown',
+            response: { error: 'Calendar not available' },
+          },
+        });
+        continue;
+      }
+
+      const result = await this.calendarService.executeFunction(fc.name, fc.args || {});
+      logger.info(`Function ${fc.name} result: ${JSON.stringify(result).substring(0, 200)}`);
+
+      responses.push({
+        functionResponse: {
+          name: fc.name,
+          response: result,
+        },
+      });
+    }
+    return responses;
+  }
+
   async generateResponse(jid: string, userMessage: string, customPrompt?: string): Promise<string> {
     try {
       // Get or initialize conversation history
       const history = this.conversationHistory.get(jid) || [];
 
       // Use custom prompt if provided, otherwise use default
-      const systemPrompt = (customPrompt || config.systemPrompt) + this.getImageInstructions();
+      const systemPrompt = (customPrompt || config.systemPrompt)
+        + this.getImageInstructions()
+        + this.getCalendarInstructions();
 
-      // Create chat with history, system instruction, and Google Search
+      // Create chat with history, system instruction, Google Search, and calendar tools
       const chat = this.ai.chats.create({
         model: config.geminiModel,
         config: {
-          tools: [{ googleSearch: {} }], // Enable Google Search for real-time info
+          tools: this.buildTools(),
         },
         history: [
           // Add system instruction as first message pair
@@ -73,14 +139,24 @@ export class GeminiService {
       });
 
       // Send message and get response
-      const response = await chat.sendMessage({
+      let response = await chat.sendMessage({
         message: userMessage,
       });
+
+      // Function calling loop (max 5 iterations)
+      let iterations = 0;
+      while (response.functionCalls && response.functionCalls.length > 0 && iterations < 5) {
+        iterations++;
+        logger.info(`Function call iteration ${iterations}: ${response.functionCalls.map(fc => fc.name).join(', ')}`);
+
+        const functionResponseParts = await this.executeFunctionCalls(response.functionCalls);
+        response = await chat.sendMessage({ message: functionResponseParts });
+      }
 
       const responseText =
         response.text || 'Sorry, I could not generate a response.';
 
-      // Update history
+      // Update history (store only final user message + final text response)
       history.push(
         { role: 'user', parts: [{ text: userMessage }] },
         { role: 'model', parts: [{ text: responseText }] }

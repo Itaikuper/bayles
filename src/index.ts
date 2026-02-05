@@ -1,10 +1,11 @@
 import { WhatsAppService } from './services/whatsapp.service.js';
 import { GeminiService } from './services/gemini.service.js';
+import { CalendarService } from './services/calendar.service.js';
 import { SchedulerService } from './services/scheduler.service.js';
 import { BirthdayService } from './services/birthday.service.js';
 import { getBotControlService } from './services/bot-control.service.js';
 import { MessageHandler } from './handlers/message.handler.js';
-import { validateConfig, config } from './config/env.js';
+import { validateConfig, isCalendarEnabled, config } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { createApiServer, startApiServer } from './api/server.js';
 import { runMigrations } from './database/migrate.js';
@@ -22,6 +23,20 @@ async function main() {
     // Initialize services
     const whatsapp = new WhatsAppService();
     const gemini = new GeminiService();
+
+    // Initialize Google Calendar (optional)
+    if (isCalendarEnabled()) {
+      try {
+        const calendarService = new CalendarService();
+        gemini.setCalendarService(calendarService);
+        logger.info('Google Calendar integration enabled');
+      } catch (error) {
+        logger.error('Failed to initialize Calendar service:', error);
+        logger.info('Bot will continue without calendar integration');
+      }
+    } else {
+      logger.info('Google Calendar not configured (optional)');
+    }
 
     // Connect to WhatsApp
     logger.info('Connecting to WhatsApp...');

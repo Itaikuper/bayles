@@ -23,7 +23,16 @@ export const config = {
 
   // Auto image generation in learning conversations
   autoImageGeneration: process.env.AUTO_IMAGE_GENERATION !== 'false',
+
+  // Google Calendar (optional)
+  googleServiceAccountKeyFile: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE || '',
+  googleCalendarId: process.env.GOOGLE_CALENDAR_ID || '',
+  calendarTimeZone: process.env.CALENDAR_TIMEZONE || 'Asia/Jerusalem',
 };
+
+export function isCalendarEnabled(): boolean {
+  return !!(config.googleServiceAccountKeyFile && config.googleCalendarId);
+}
 
 export function validateConfig(): void {
   if (!config.geminiApiKey) {
