@@ -314,11 +314,19 @@ export class MessageHandler {
     const sender = isGroup ? message.key.participant : jid;
     const fileName = documentMessage.fileName || 'document';
 
+    const caption = documentMessage.caption || '';
+
     logger.info(`Document message from ${sender} in ${isGroup ? 'group' : 'DM'}: ${fileName}`);
 
-    // In groups: only respond if reply-to-bot
-    if (isGroup && !this.isReplyToBotMessage(message)) {
-      return;
+    // In groups: only respond if reply-to-bot, mentioned, or caption has trigger word
+    if (isGroup) {
+      const isReplyToBot = this.isReplyToBotMessage(message);
+      const isMentioned = this.isMentioningBot(message);
+      const hasTriggerWord = /(?:^|[\s,.!?])(?:פרופסור|בוט)(?:[\s,.!?]|$)/.test(caption);
+
+      if (!isReplyToBot && !isMentioned && !hasTriggerWord) {
+        return;
+      }
     }
 
     const decision = this.botControl.shouldRespondToMessage(jid, isGroup);
@@ -350,11 +358,16 @@ export class MessageHandler {
         ? `[${message.pushName}]`
         : undefined;
 
+      // Strip trigger words from caption
+      const cleanCaption = caption
+        ? caption.replace(/(?:^|[\s,.!?])(?:פרופסור|בוט)(?:[\s,.!?]|$)/g, ' ').trim()
+        : undefined;
+
       const response = await this.gemini.generateDocumentAnalysisResponse(
         jid,
         docBuffer,
         mimeType,
-        undefined,
+        cleanCaption || undefined,
         decision.customPrompt,
         contextPrefix,
         fileName
