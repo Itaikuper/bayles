@@ -127,11 +127,12 @@ export class MessageHandler {
     if (!contextInfo?.participant) return false;
 
     const botJid = this.whatsapp.getBotJid();
-    if (!botJid) return false;
+    const botLid = this.whatsapp.getBotLid();
+    if (!botJid && !botLid) return false;
 
-    // Normalize the participant JID for comparison
+    // Check both phone JID and LID formats
     const participantNormalized = contextInfo.participant.replace(/:.*@/, '@');
-    return participantNormalized === botJid;
+    return participantNormalized === botJid || participantNormalized === botLid;
   }
 
   private isMentioningBot(message: proto.IWebMessageInfo): boolean {
