@@ -143,11 +143,9 @@ export class GeminiService {
       });
 
       if (!response.candidates?.[0]?.content?.parts) {
-        logger.warn('Image generation returned no parts', {
-          finishReason: response.candidates?.[0]?.finishReason,
-          candidatesCount: response.candidates?.length,
-        });
-        return null;
+        const reason = response.candidates?.[0]?.finishReason || 'unknown';
+        logger.warn('Image generation returned no parts', { finishReason: reason });
+        throw new Error(`No image parts (finishReason: ${reason})`);
       }
 
       let imageBuffer: Buffer | null = null;
@@ -162,14 +160,8 @@ export class GeminiService {
       }
 
       if (!imageBuffer) {
-        logger.warn('Image generation returned no image data', {
-          partsCount: response.candidates[0].content.parts.length,
-          partTypes: response.candidates[0].content.parts.map(p =>
-            p.text ? 'text' : p.inlineData ? 'inlineData' : 'unknown'
-          ),
-          textContent: text?.substring(0, 200),
-        });
-        return null;
+        logger.warn('Image generation returned no image data', { textContent: text?.substring(0, 200) });
+        throw new Error(`No image data returned. AI said: ${text?.substring(0, 150) || 'nothing'}`);
       }
 
       return { image: imageBuffer, text };

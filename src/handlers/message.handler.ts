@@ -595,10 +595,11 @@ export class MessageHandler {
         );
       }
     } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
       logger.error('Error generating image:', error);
       await this.whatsapp.sendReply(
         jid,
-        'שגיאה ביצירת התמונה. נסה שוב.',
+        `שגיאה ביצירת התמונה: ${errMsg}`,
         originalMessage
       );
     }
