@@ -12,6 +12,7 @@ export declare class WhatsAppService {
     private connectionGeneration;
     private onConnectedCallback;
     private onGroupParticipantsUpdateCallback;
+    private onContactsUpdateCallback;
     connect(): Promise<WASocket>;
     onMessage(handler: (message: proto.IWebMessageInfo) => Promise<void>): void;
     sendTextMessage(jid: string, text: string): Promise<void>;
@@ -30,6 +31,10 @@ export declare class WhatsAppService {
     private getMimeType;
     onConnected(callback: () => Promise<void>): void;
     onGroupParticipantsUpdate(callback: (groupJid: string, participants: string[], action: string) => Promise<void>): void;
+    onContactsUpdate(callback: (contacts: {
+        id: string;
+        notify?: string;
+    }[]) => void): void;
     findGroupByName(name: string): Promise<string | null>;
     getGroupParticipants(groupJid: string): Promise<{
         id: string;

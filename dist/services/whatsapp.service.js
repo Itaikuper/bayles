@@ -15,6 +15,7 @@ export class WhatsAppService {
     connectionGeneration = 0;
     onConnectedCallback = null;
     onGroupParticipantsUpdateCallback = null;
+    onContactsUpdateCallback = null;
     async connect() {
         if (this.isConnecting) {
             logger.warn('Connection attempt already in progress, skipping');
@@ -92,6 +93,21 @@ export class WhatsAppService {
                     if (this.onGroupParticipantsUpdateCallback) {
                         this.onGroupParticipantsUpdateCallback(update.id, update.participants, update.action)
                             .catch(err => logger.error('Group participants update callback error:', err));
+                    }
+                }
+                // --- Contacts update (provides display names for LID contacts) ---
+                if (events['contacts.upsert']) {
+                    const contacts = events['contacts.upsert'];
+                    logger.info(`DEBUG contacts.upsert: ${JSON.stringify(contacts.map(c => ({ id: c.id, notify: c.notify, name: c.name })))}`);
+                    if (this.onContactsUpdateCallback) {
+                        this.onContactsUpdateCallback(contacts.map(c => ({ id: c.id, notify: c.notify || c.name })));
+                    }
+                }
+                if (events['contacts.update']) {
+                    const contacts = events['contacts.update'];
+                    logger.info(`DEBUG contacts.update: ${JSON.stringify(contacts.map(c => ({ id: c.id, notify: c.notify, name: c.name })))}`);
+                    if (this.onContactsUpdateCallback) {
+                        this.onContactsUpdateCallback(contacts.map(c => ({ id: c.id, notify: c.notify || c.name })));
                     }
                 }
                 // --- Incoming messages ---
@@ -276,6 +292,9 @@ export class WhatsAppService {
     }
     onGroupParticipantsUpdate(callback) {
         this.onGroupParticipantsUpdateCallback = callback;
+    }
+    onContactsUpdate(callback) {
+        this.onContactsUpdateCallback = callback;
     }
     async findGroupByName(name) {
         if (!this.sock)

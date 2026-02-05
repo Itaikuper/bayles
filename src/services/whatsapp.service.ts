@@ -25,6 +25,7 @@ export class WhatsAppService {
   private connectionGeneration: number = 0;
   private onConnectedCallback: (() => Promise<void>) | null = null;
   private onGroupParticipantsUpdateCallback: ((groupJid: string, participants: string[], action: string) => Promise<void>) | null = null;
+  private onContactsUpdateCallback: ((contacts: { id: string; notify?: string }[]) => void) | null = null;
 
   async connect(): Promise<WASocket> {
     if (this.isConnecting) {
@@ -112,6 +113,22 @@ export class WhatsAppService {
           if (this.onGroupParticipantsUpdateCallback) {
             this.onGroupParticipantsUpdateCallback(update.id, update.participants, update.action)
               .catch(err => logger.error('Group participants update callback error:', err));
+          }
+        }
+
+        // --- Contacts update (provides display names for LID contacts) ---
+        if (events['contacts.upsert']) {
+          const contacts = events['contacts.upsert'] as { id: string; notify?: string; name?: string }[];
+          logger.info(`DEBUG contacts.upsert: ${JSON.stringify(contacts.map(c => ({ id: c.id, notify: c.notify, name: c.name })))}`);
+          if (this.onContactsUpdateCallback) {
+            this.onContactsUpdateCallback(contacts.map(c => ({ id: c.id, notify: c.notify || c.name })));
+          }
+        }
+        if (events['contacts.update']) {
+          const contacts = events['contacts.update'] as { id: string; notify?: string; name?: string }[];
+          logger.info(`DEBUG contacts.update: ${JSON.stringify(contacts.map(c => ({ id: c.id, notify: c.notify, name: c.name })))}`);
+          if (this.onContactsUpdateCallback) {
+            this.onContactsUpdateCallback(contacts.map(c => ({ id: c.id, notify: c.notify || c.name })));
           }
         }
 
@@ -336,6 +353,10 @@ export class WhatsAppService {
 
   onGroupParticipantsUpdate(callback: (groupJid: string, participants: string[], action: string) => Promise<void>): void {
     this.onGroupParticipantsUpdateCallback = callback;
+  }
+
+  onContactsUpdate(callback: (contacts: { id: string; notify?: string }[]) => void): void {
+    this.onContactsUpdateCallback = callback;
   }
 
   async findGroupByName(name: string): Promise<string | null> {

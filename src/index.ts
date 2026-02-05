@@ -86,6 +86,19 @@ async function main() {
       logger.info(`Auto-whitelisted ${participants.length} new family group member(s)`);
     });
 
+    // Save contact names from Baileys contacts events (fills in LID display names)
+    whatsapp.onContactsUpdate((contacts) => {
+      for (const contact of contacts) {
+        if (contact.notify && contact.id) {
+          const existingConfig = botControl.getChatConfig(contact.id);
+          if (existingConfig && !existingConfig.display_name) {
+            botControl.updateChat(contact.id, { display_name: contact.notify });
+            logger.info(`Saved display_name "${contact.notify}" for ${contact.id} (from contacts event)`);
+          }
+        }
+      }
+    });
+
     // Register message handler (async - awaited by WhatsApp service for serialized processing)
     whatsapp.onMessage(async (message) => {
       try {

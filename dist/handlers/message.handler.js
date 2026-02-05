@@ -19,6 +19,7 @@ export class MessageHandler {
         if (!jid)
             return;
         // Update display_name from pushName as early as possible (before any early returns)
+        logger.info(`DEBUG pushName: "${message.pushName}" for ${jid}`);
         if (message.pushName) {
             const isGroupChat = jid.endsWith('@g.us');
             const chatJid = isGroupChat ? jid : jid;
