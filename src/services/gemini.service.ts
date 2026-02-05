@@ -20,20 +20,28 @@ export class GeminiService {
     if (!config.autoImageGeneration) return '';
     return `
 
-יש לך יכולת ליצור תמונות (גרפים, דיאגרמות, איורים, אינפוגרפיקות).
+יש לך יכולת ליצור תמונות (גרפים, דיאגרמות, איורים, אינפוגרפיקות) באמצעות תגיות מיוחדות.
 
-חשוב מאוד: אל תייצר תמונות באופן אוטומטי! במקום זה:
-- כשאתה חושב שתמונה תעזור להבנה, הצע למשתמש: "אני יכול ליצור תמונה/גרף/דיאגרמה של [הנושא], רוצה?"
-- רק כשהמשתמש מבקש במפורש לייצר תמונה (למשל "כן", "תייצר", "בוא", "רוצה"), הכנס תגית:
-  [IMAGE: תיאור מפורט באנגלית]
-- אם התמונה צריכה טקסט בעברית, השתמש ב:
-  [PRO_IMAGE: תיאור מפורט באנגלית, with Hebrew text labels]
+מתי להשתמש:
+- כשהמשתמש מבקש במפורש לייצר תמונה/גרף/אינפוגרפיקה/איור - הכנס תגית מיד, בלי לתאר מילולית מה תהיה התמונה.
+- כשהמשתמש אומר "כן"/"בוא"/"תייצר" בתגובה להצעה שלך - הכנס תגית מיד.
+- כשאתה חושב שתמונה תעזור אבל המשתמש לא ביקש - הצע בקצרה: "רוצה שאייצר גרף/איור של זה?"
 
-כללים לתגית IMAGE/PRO_IMAGE (רק אחרי שהמשתמש אישר):
-1. התמונה חייבת להיות קשורה ישירות לנושא הספציפי שנדון. כלול פרטים קונקרטיים מהשיחה.
-2. התיאור באנגלית, מפורט ומדויק.
+פורמט התגית:
+[IMAGE: actual English description of the specific image]
+[PRO_IMAGE: actual English description, use this when image needs Hebrew text]
+
+דוגמה נכונה - אם לימדת על סינוסים ובקשו גרף:
+[IMAGE: mathematical graph showing y=sin(x) curve from 0 to 2pi, with x-axis marked at pi/2, pi, 3pi/2, 2pi, y-axis from -1 to 1, blue curve on white grid]
+
+דוגמה נכונה - אם לימדת גמרא מנחות על ציץ ובקשו אינפוגרפיקה:
+[PRO_IMAGE: educational infographic about the Tzitz (golden head plate), split into two sections: left side shows green checkmark with title in Hebrew "מכפר על טומאה" listing tumah of kohen and korban, right side shows red X with title in Hebrew "לא מכפר על יוצא" explaining korban that left its boundary is completely invalid]
+
+כללים:
+1. התיאור חייב להיות תוכן אמיתי וספציפי לנושא השיחה - לא תבנית כללית!
+2. אל תתאר את התמונה במילים בטקסט. פשוט הכנס את התגית וזהו.
 3. טקסט בעברית בתמונה = PRO_IMAGE.
-4. אל תכתוב "אני מייצר תמונה" - פשוט הכנס את התגית.`;
+4. מקסימום תגית אחת בתשובה.`;
   }
 
   async generateResponse(jid: string, userMessage: string, customPrompt?: string): Promise<string> {
