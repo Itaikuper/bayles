@@ -36,11 +36,11 @@ const createScheduleDeclaration = {
             },
             message: {
                 type: Type.STRING,
-                description: 'Message content to send. Extract the actual message from user request.',
+                description: 'The message content or AI prompt. If useAi=true, this is the instruction/topic for AI (e.g., "תוכן על פרשת השבוע"). If useAi=false, this is the exact text to send.',
             },
             useAi: {
                 type: Type.BOOLEAN,
-                description: 'true if message is a prompt for AI to generate new content each time (e.g., "תייצר ציטוט", "כתוב בדיחה"). false for fixed messages.',
+                description: 'Set to TRUE when the message is a TOPIC or INSTRUCTION for AI to generate content (e.g., "בנושא פרשת השבוע", "על מזג האוויר", "ציטוט מעורר השראה", "בדיחה", "תוכן על X"). Set to FALSE only for EXACT fixed text to send literally (e.g., "בוקר טוב!", "שבת שלום"). When in doubt, use TRUE.',
             },
         },
         required: ['targetName', 'hour', 'minute', 'message', 'useAi'],
