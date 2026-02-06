@@ -1,3 +1,4 @@
+import { ScheduleRepository } from '../database/repositories/schedule.repository.js';
 import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 export class MessageHandler {
@@ -493,11 +494,21 @@ export class MessageHandler {
             const targetName = await this.getTargetDisplayName(targetJid);
             let scheduleId;
             let scheduleDescription;
+            const scheduleRepo = new ScheduleRepository();
             if (args.days && args.days.length > 0) {
                 // Recurring schedule
                 const cronExpression = this.buildCronExpression(hour, minute, args.days);
                 scheduleId = this.scheduler.scheduleMessage(targetJid, args.message, cronExpression, false, args.useAi);
                 scheduleDescription = this.formatDaysDescription(args.days, hour, minute);
+                // Persist to database
+                scheduleRepo.create({
+                    id: scheduleId,
+                    jid: targetJid,
+                    message: args.message,
+                    cronExpression,
+                    oneTime: false,
+                    useAi: args.useAi,
+                });
             }
             else if (args.oneTimeDate) {
                 // One-time schedule
@@ -508,6 +519,16 @@ export class MessageHandler {
                 }
                 scheduleId = this.scheduler.scheduleOneTimeMessage(targetJid, args.message, scheduledDate, args.useAi);
                 scheduleDescription = `${args.oneTimeDate} ב-${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+                // Persist to database
+                scheduleRepo.create({
+                    id: scheduleId,
+                    jid: targetJid,
+                    message: args.message,
+                    cronExpression: 'one-time',
+                    oneTime: true,
+                    scheduledAt: scheduledDate.toISOString(),
+                    useAi: args.useAi,
+                });
             }
             else {
                 await this.whatsapp.sendReply(jid, '❌ לא הצלחתי להבין מתי לשלוח. נסה לציין ימים או תאריך.', originalMessage);
