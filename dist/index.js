@@ -8,7 +8,7 @@ import { validateConfig, config } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { createApiServer, startApiServer } from './api/server.js';
 import { runMigrations } from './database/migrate.js';
-import { closeDatabase } from './database/db.js';
+import { closeDatabase, getDatabase } from './database/db.js';
 async function main() {
     try {
         // Validate configuration
@@ -16,6 +16,14 @@ async function main() {
         logger.info('Configuration validated');
         // Run database migrations
         runMigrations();
+        // Load saved system prompt from database (if exists)
+        const savedPrompt = getDatabase()
+            .prepare('SELECT value FROM ai_settings WHERE key = ?')
+            .get('systemPrompt');
+        if (savedPrompt?.value) {
+            config.systemPrompt = savedPrompt.value;
+            logger.info('Loaded system prompt from database');
+        }
         // Initialize services
         const whatsapp = new WhatsAppService();
         const gemini = new GeminiService();

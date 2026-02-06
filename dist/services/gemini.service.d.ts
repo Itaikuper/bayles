@@ -14,6 +14,11 @@ export declare class GeminiService {
     } | null>;
     generateSpeech(text: string): Promise<Buffer>;
     private convertPcmToOgg;
+    /**
+     * Generate content for scheduled messages - NO function calling
+     * This prevents AI from re-interpreting prompts as scheduling requests
+     */
+    generateScheduledContent(prompt: string): Promise<string>;
     clearHistory(jid: string): void;
     clearAllHistory(): void;
     listConversations(): {

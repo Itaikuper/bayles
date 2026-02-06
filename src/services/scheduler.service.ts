@@ -33,14 +33,15 @@ export class SchedulerService {
 
         if (useAi) {
           try {
-            const schedulerJid = `scheduled:${jid}`;
-            const schedulerPrompt =
+            // Use dedicated method WITHOUT function calling
+            // to prevent AI from re-interpreting prompts as scheduling requests
+            const fullPrompt =
               'You are a content generator for scheduled messages. ' +
               'Output ONLY the requested content. ' +
               'Do NOT add any conversational prefix, greeting, or introduction like "Sure!", "Here it is:", etc. ' +
-              'Just produce the content directly as instructed by the prompt.';
-            const aiResponse = await this.gemini.generateResponse(schedulerJid, message, schedulerPrompt);
-            textToSend = aiResponse.text || message;
+              'Just produce the content directly as instructed by the prompt.\n\n' +
+              `Prompt: ${message}`;
+            textToSend = await this.gemini.generateScheduledContent(fullPrompt);
             logger.info(`AI processed scheduled message ${id} for ${jid}`);
           } catch (aiError) {
             logger.error(`AI processing failed for scheduled message ${id}:`, aiError);

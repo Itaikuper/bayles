@@ -427,6 +427,28 @@ export class GeminiService {
     }
   }
 
+  /**
+   * Generate content for scheduled messages - NO function calling
+   * This prevents AI from re-interpreting prompts as scheduling requests
+   */
+  async generateScheduledContent(prompt: string): Promise<string> {
+    try {
+      const response = await this.ai.models.generateContent({
+        model: config.geminiModel,
+        contents: prompt,
+        config: {
+          // NO tools - no function calling, no google search
+          // Just pure content generation
+        },
+      });
+
+      return response.text || 'לא הצלחתי ליצור תוכן.';
+    } catch (error) {
+      logger.error('Gemini scheduled content error:', error);
+      throw error;
+    }
+  }
+
   clearHistory(jid: string): void {
     this.conversationHistory.delete(jid);
     logger.info(`Cleared conversation history for ${jid}`);
