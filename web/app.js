@@ -45,6 +45,7 @@ function Sidebar({ currentPage, setCurrentPage }) {
     { id: 'messages', label: 'הודעות', icon: '💬' },
     { id: 'ai', label: 'הגדרות AI', icon: '🤖' },
     { id: 'personalities', label: 'אישיויות', icon: '🎭' },
+    { id: 'tenants', label: 'עסקים', icon: '🏢' },
   ];
 
   return (
@@ -1836,6 +1837,295 @@ function Birthdays() {
   );
 }
 
+// Tenants Component - Multi-tenant management
+function Tenants() {
+  const [tenants, setTenants] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newTenant, setNewTenant] = useState({ name: '', system_prompt: '' });
+  const [selectedTenant, setSelectedTenant] = useState(null);
+  const [qrLoading, setQrLoading] = useState({});
+  const [qrImages, setQrImages] = useState({});
+
+  useEffect(() => {
+    loadTenants();
+    const interval = setInterval(loadTenants, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const loadTenants = async () => {
+    try {
+      const data = await api.get('/tenants');
+      setTenants(data);
+    } catch (err) {
+      console.error('Failed to load tenants:', err);
+    }
+    setLoading(false);
+  };
+
+  const createTenant = async () => {
+    if (!newTenant.name.trim()) {
+      alert('יש להזין שם לעסק');
+      return;
+    }
+    try {
+      await api.post('/tenants', newTenant);
+      setNewTenant({ name: '', system_prompt: '' });
+      setShowAddModal(false);
+      loadTenants();
+    } catch (err) {
+      alert('שגיאה ביצירת העסק');
+    }
+  };
+
+  const deleteTenant = async (id) => {
+    if (!confirm('האם למחוק את העסק הזה? כל הנתונים יימחקו!')) return;
+    try {
+      await api.delete(`/tenants/${id}`);
+      loadTenants();
+    } catch (err) {
+      alert('שגיאה במחיקה: ' + (err.message || ''));
+    }
+  };
+
+  const connectTenant = async (id) => {
+    setQrLoading(prev => ({ ...prev, [id]: true }));
+    try {
+      await api.post(`/tenants/${id}/connect`);
+      // Wait a bit and fetch QR
+      setTimeout(() => fetchQR(id), 2000);
+    } catch (err) {
+      alert('שגיאה בהתחברות');
+      setQrLoading(prev => ({ ...prev, [id]: false }));
+    }
+  };
+
+  const disconnectTenant = async (id) => {
+    try {
+      await api.post(`/tenants/${id}/disconnect`);
+      setQrImages(prev => ({ ...prev, [id]: null }));
+      loadTenants();
+    } catch (err) {
+      alert('שגיאה בניתוק');
+    }
+  };
+
+  const fetchQR = async (id) => {
+    try {
+      const res = await fetch(`/api/tenants/${id}/qr`);
+      if (res.ok && res.headers.get('content-type')?.includes('image')) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        setQrImages(prev => ({ ...prev, [id]: url }));
+      } else {
+        const data = await res.json();
+        if (data.status === 'connected') {
+          loadTenants();
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch QR:', err);
+    }
+    setQrLoading(prev => ({ ...prev, [id]: false }));
+  };
+
+  const getStatusBadge = (status) => {
+    switch (status) {
+      case 'connected':
+        return <span className="badge badge-success">מחובר</span>;
+      case 'connecting':
+        return <span className="badge badge-warning">מתחבר...</span>;
+      case 'disconnected':
+        return <span className="badge badge-secondary">מנותק</span>;
+      default:
+        return <span className="badge badge-secondary">{status}</span>;
+    }
+  };
+
+  if (loading) return <div className="loading">טוען...</div>;
+
+  return (
+    <div>
+      <div className="header">
+        <h2>ניהול עסקים</h2>
+        <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
+          הוסף עסק חדש
+        </button>
+      </div>
+
+      <div className="info-box" style={{ marginBottom: '20px' }}>
+        כאן תוכל לנהל מספר עסקים. כל עסק מקבל מספר WhatsApp משלו, QR סריקה נפרדת, ומאגר ידע ייחודי.
+      </div>
+
+      <div className="card">
+        <div className="card-header">
+          <h3>עסקים ({tenants.length})</h3>
+        </div>
+        <div className="card-body">
+          {tenants.length === 0 ? (
+            <div className="empty-state">אין עסקים. צור עסק חדש כדי להתחיל.</div>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>שם</th>
+                  <th>מספר טלפון</th>
+                  <th>סטטוס</th>
+                  <th>פעולות</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tenants.map(tenant => (
+                  <tr key={tenant.id}>
+                    <td>
+                      <strong>{tenant.name}</strong>
+                      {tenant.id === 'default' && <span className="badge badge-info" style={{ marginRight: '8px' }}>ברירת מחדל</span>}
+                    </td>
+                    <td>{tenant.phone || '-'}</td>
+                    <td>{getStatusBadge(tenant.connectionStatus || tenant.status)}</td>
+                    <td>
+                      {tenant.connectionStatus === 'connected' ? (
+                        <button
+                          className="btn btn-small btn-danger"
+                          onClick={() => disconnectTenant(tenant.id)}
+                        >
+                          נתק
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-small btn-primary"
+                          onClick={() => connectTenant(tenant.id)}
+                          disabled={qrLoading[tenant.id]}
+                        >
+                          {qrLoading[tenant.id] ? 'מתחבר...' : 'חבר'}
+                        </button>
+                      )}
+                      <button
+                        className="btn btn-small btn-secondary"
+                        onClick={() => setSelectedTenant(tenant)}
+                        style={{ marginRight: '4px' }}
+                      >
+                        הגדרות
+                      </button>
+                      {tenant.id !== 'default' && (
+                        <button
+                          className="btn btn-small btn-danger"
+                          onClick={() => deleteTenant(tenant.id)}
+                          style={{ marginRight: '4px' }}
+                        >
+                          מחק
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {/* QR Code Display */}
+      {Object.entries(qrImages).map(([id, url]) => url && (
+        <div key={id} className="card">
+          <div className="card-header">
+            <h3>סרוק QR עבור: {tenants.find(t => t.id === id)?.name}</h3>
+            <button className="btn btn-small btn-secondary" onClick={() => setQrImages(prev => ({ ...prev, [id]: null }))}>
+              סגור
+            </button>
+          </div>
+          <div className="card-body" style={{ textAlign: 'center' }}>
+            <img src={url} alt="QR Code" style={{ maxWidth: '300px' }} />
+            <p style={{ marginTop: '16px', color: '#666' }}>
+              סרוק את הקוד באפליקציית WhatsApp (מכשירים מקושרים)
+            </p>
+            <button className="btn btn-secondary" onClick={() => fetchQR(id)}>
+              רענן QR
+            </button>
+          </div>
+        </div>
+      ))}
+
+      {/* Add Tenant Modal */}
+      {showAddModal && (
+        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>הוסף עסק חדש</h3>
+              <button className="modal-close" onClick={() => setShowAddModal(false)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label>שם העסק</label>
+                <input
+                  type="text"
+                  value={newTenant.name}
+                  onChange={e => setNewTenant({ ...newTenant, name: e.target.value })}
+                  placeholder="לדוגמה: פיצה רומא"
+                />
+              </div>
+              <div className="form-group">
+                <label>System Prompt (אופציונלי)</label>
+                <textarea
+                  value={newTenant.system_prompt}
+                  onChange={e => setNewTenant({ ...newTenant, system_prompt: e.target.value })}
+                  placeholder="הוראות ייחודיות לבוט של העסק הזה..."
+                  rows="4"
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowAddModal(false)}>ביטול</button>
+              <button className="btn btn-primary" onClick={createTenant}>צור עסק</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tenant Settings Modal */}
+      {selectedTenant && (
+        <div className="modal-overlay" onClick={() => setSelectedTenant(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>הגדרות: {selectedTenant.name}</h3>
+              <button className="modal-close" onClick={() => setSelectedTenant(null)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <div className="settings-row">
+                <span>מזהה:</span>
+                <code style={{ background: '#f5f5f5', padding: '2px 8px', borderRadius: '4px' }}>{selectedTenant.id}</code>
+              </div>
+              <div className="settings-row">
+                <span>מספר טלפון:</span>
+                <span>{selectedTenant.phone || 'לא מחובר'}</span>
+              </div>
+              <div className="settings-row">
+                <span>סטטוס:</span>
+                {getStatusBadge(selectedTenant.connectionStatus || selectedTenant.status)}
+              </div>
+              <div className="settings-row">
+                <span>נוצר:</span>
+                <span>{new Date(selectedTenant.created_at).toLocaleString('he-IL')}</span>
+              </div>
+              {selectedTenant.system_prompt && (
+                <div style={{ marginTop: '16px' }}>
+                  <strong>System Prompt:</strong>
+                  <div style={{ marginTop: '8px', padding: '12px', background: '#f5f5f5', borderRadius: '6px', whiteSpace: 'pre-wrap' }}>
+                    {selectedTenant.system_prompt}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setSelectedTenant(null)}>סגור</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const [currentPage, setCurrentPage] = useState('dashboard');
 
@@ -1851,6 +2141,7 @@ function App() {
       case 'messages': return <Messages />;
       case 'ai': return <AISettings />;
       case 'personalities': return <Personalities />;
+      case 'tenants': return <Tenants />;
       default: return <Dashboard />;
     }
   };

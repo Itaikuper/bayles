@@ -5,9 +5,9 @@ export declare class GeminiService {
     private maxHistoryLength;
     constructor();
     private getImageInstructions;
-    generateResponse(jid: string, userMessage: string, customPrompt?: string): Promise<GeminiResponse>;
-    generateAudioResponse(jid: string, audioBuffer: Buffer, mimeType: string, customPrompt?: string, contextPrefix?: string): Promise<string>;
-    generateDocumentAnalysisResponse(jid: string, mediaBuffer: Buffer, mimeType: string, caption?: string, customPrompt?: string, contextPrefix?: string, fileName?: string): Promise<string>;
+    generateResponse(jid: string, userMessage: string, customPrompt?: string, tenantId?: string): Promise<GeminiResponse>;
+    generateAudioResponse(jid: string, audioBuffer: Buffer, mimeType: string, customPrompt?: string, contextPrefix?: string, tenantId?: string): Promise<string>;
+    generateDocumentAnalysisResponse(jid: string, mediaBuffer: Buffer, mimeType: string, caption?: string, customPrompt?: string, contextPrefix?: string, fileName?: string, tenantId?: string): Promise<string>;
     generateImage(prompt: string, pro?: boolean): Promise<{
         image: Buffer;
         text?: string;
@@ -19,7 +19,7 @@ export declare class GeminiService {
      * This prevents AI from re-interpreting prompts as scheduling requests
      */
     generateScheduledContent(prompt: string): Promise<string>;
-    clearHistory(jid: string): void;
+    clearHistory(jid: string, tenantId?: string): void;
     clearAllHistory(): void;
     listConversations(): {
         jid: string;

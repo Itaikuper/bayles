@@ -159,4 +159,42 @@ export function runMigrations() {
         db.prepare('INSERT INTO migrations (name) VALUES (?)').run('005_knowledge_base');
         logger.info('Migration 005_knowledge_base completed');
     }
+    // Migration 006: Multi-tenant support
+    const applied006 = db.prepare('SELECT name FROM migrations WHERE name = ?').get('006_multi_tenant');
+    if (!applied006) {
+        logger.info('Running migration: 006_multi_tenant');
+        // Create tenants table
+        db.exec(`
+      CREATE TABLE IF NOT EXISTS tenants (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        phone TEXT,
+        status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'connecting', 'connected', 'disconnected')),
+        system_prompt TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+        // Insert default tenant for backwards compatibility
+        db.exec(`
+      INSERT OR IGNORE INTO tenants (id, name, status)
+      VALUES ('default', 'Default Bot', 'connected')
+    `);
+        // Add tenant_id to existing tables
+        db.exec(`ALTER TABLE chat_configs ADD COLUMN tenant_id TEXT DEFAULT 'default' REFERENCES tenants(id)`);
+        db.exec(`ALTER TABLE knowledge_items ADD COLUMN tenant_id TEXT DEFAULT 'default' REFERENCES tenants(id)`);
+        db.exec(`ALTER TABLE scheduled_messages ADD COLUMN tenant_id TEXT DEFAULT 'default' REFERENCES tenants(id)`);
+        db.exec(`ALTER TABLE messages ADD COLUMN tenant_id TEXT DEFAULT 'default' REFERENCES tenants(id)`);
+        db.exec(`ALTER TABLE activity_log ADD COLUMN tenant_id TEXT DEFAULT 'default' REFERENCES tenants(id)`);
+        db.exec(`ALTER TABLE birthdays ADD COLUMN tenant_id TEXT DEFAULT 'default' REFERENCES tenants(id)`);
+        // Create indexes for tenant_id
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_configs_tenant ON chat_configs(tenant_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_knowledge_items_tenant ON knowledge_items(tenant_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_scheduled_messages_tenant ON scheduled_messages(tenant_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_tenant ON messages(tenant_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_activity_log_tenant ON activity_log(tenant_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_birthdays_tenant ON birthdays(tenant_id)`);
+        db.prepare('INSERT INTO migrations (name) VALUES (?)').run('006_multi_tenant');
+        logger.info('Migration 006_multi_tenant completed');
+    }
 }

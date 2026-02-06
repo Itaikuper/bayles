@@ -81,10 +81,11 @@ export class GeminiService {
 3. טקסט בעברית בתמונה = PRO_IMAGE.
 4. מקסימום תגית אחת בתשובה.`;
     }
-    async generateResponse(jid, userMessage, customPrompt) {
+    async generateResponse(jid, userMessage, customPrompt, tenantId = 'default') {
         try {
-            // Get or initialize conversation history
-            const history = this.conversationHistory.get(jid) || [];
+            // Get or initialize conversation history (scoped by tenant)
+            const historyKey = `${tenantId}:${jid}`;
+            const history = this.conversationHistory.get(historyKey) || [];
             // Get knowledge base for this chat
             const knowledgeRepo = getKnowledgeRepository();
             const knowledgeContext = knowledgeRepo.getFormattedKnowledge(jid);
@@ -142,7 +143,7 @@ export class GeminiService {
             while (history.length > this.maxHistoryLength * 2) {
                 history.shift();
             }
-            this.conversationHistory.set(jid, history);
+            this.conversationHistory.set(historyKey, history);
             return { type: 'text', text: responseText };
         }
         catch (error) {
@@ -150,9 +151,10 @@ export class GeminiService {
             return { type: 'text', text: 'Sorry, I encountered an error processing your request.' };
         }
     }
-    async generateAudioResponse(jid, audioBuffer, mimeType, customPrompt, contextPrefix) {
+    async generateAudioResponse(jid, audioBuffer, mimeType, customPrompt, contextPrefix, tenantId = 'default') {
         try {
-            const history = this.conversationHistory.get(jid) || [];
+            const historyKey = `${tenantId}:${jid}`;
+            const history = this.conversationHistory.get(historyKey) || [];
             const knowledgeRepo = getKnowledgeRepository();
             const knowledgeContext = knowledgeRepo.getFormattedKnowledge(jid);
             const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + this.getImageInstructions();
@@ -192,7 +194,7 @@ export class GeminiService {
             while (history.length > this.maxHistoryLength * 2) {
                 history.shift();
             }
-            this.conversationHistory.set(jid, history);
+            this.conversationHistory.set(historyKey, history);
             return responseText;
         }
         catch (error) {
@@ -200,9 +202,10 @@ export class GeminiService {
             return 'Sorry, I encountered an error processing the voice message.';
         }
     }
-    async generateDocumentAnalysisResponse(jid, mediaBuffer, mimeType, caption, customPrompt, contextPrefix, fileName) {
+    async generateDocumentAnalysisResponse(jid, mediaBuffer, mimeType, caption, customPrompt, contextPrefix, fileName, tenantId = 'default') {
         try {
-            const history = this.conversationHistory.get(jid) || [];
+            const historyKey = `${tenantId}:${jid}`;
+            const history = this.conversationHistory.get(historyKey) || [];
             const knowledgeRepo = getKnowledgeRepository();
             const knowledgeContext = knowledgeRepo.getFormattedKnowledge(jid);
             const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + this.getImageInstructions();
@@ -257,7 +260,7 @@ export class GeminiService {
             while (history.length > this.maxHistoryLength * 2) {
                 history.shift();
             }
-            this.conversationHistory.set(jid, history);
+            this.conversationHistory.set(historyKey, history);
             return responseText;
         }
         catch (error) {
@@ -391,9 +394,10 @@ export class GeminiService {
             throw error;
         }
     }
-    clearHistory(jid) {
-        this.conversationHistory.delete(jid);
-        logger.info(`Cleared conversation history for ${jid}`);
+    clearHistory(jid, tenantId = 'default') {
+        const historyKey = `${tenantId}:${jid}`;
+        this.conversationHistory.delete(historyKey);
+        logger.info(`Cleared conversation history for ${historyKey}`);
     }
     clearAllHistory() {
         this.conversationHistory.clear();

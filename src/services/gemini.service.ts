@@ -87,10 +87,11 @@ export class GeminiService {
 4. מקסימום תגית אחת בתשובה.`;
   }
 
-  async generateResponse(jid: string, userMessage: string, customPrompt?: string): Promise<GeminiResponse> {
+  async generateResponse(jid: string, userMessage: string, customPrompt?: string, tenantId: string = 'default'): Promise<GeminiResponse> {
     try {
-      // Get or initialize conversation history
-      const history = this.conversationHistory.get(jid) || [];
+      // Get or initialize conversation history (scoped by tenant)
+      const historyKey = `${tenantId}:${jid}`;
+      const history = this.conversationHistory.get(historyKey) || [];
 
       // Get knowledge base for this chat
       const knowledgeRepo = getKnowledgeRepository();
@@ -163,7 +164,7 @@ export class GeminiService {
         history.shift();
       }
 
-      this.conversationHistory.set(jid, history);
+      this.conversationHistory.set(historyKey, history);
 
       return { type: 'text', text: responseText };
     } catch (error) {
@@ -177,10 +178,12 @@ export class GeminiService {
     audioBuffer: Buffer,
     mimeType: string,
     customPrompt?: string,
-    contextPrefix?: string
+    contextPrefix?: string,
+    tenantId: string = 'default'
   ): Promise<string> {
     try {
-      const history = this.conversationHistory.get(jid) || [];
+      const historyKey = `${tenantId}:${jid}`;
+      const history = this.conversationHistory.get(historyKey) || [];
       const knowledgeRepo = getKnowledgeRepository();
       const knowledgeContext = knowledgeRepo.getFormattedKnowledge(jid);
       const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + this.getImageInstructions();
@@ -230,7 +233,7 @@ export class GeminiService {
         history.shift();
       }
 
-      this.conversationHistory.set(jid, history);
+      this.conversationHistory.set(historyKey, history);
       return responseText;
     } catch (error) {
       logger.error('Gemini audio API error:', error);
@@ -245,10 +248,12 @@ export class GeminiService {
     caption?: string,
     customPrompt?: string,
     contextPrefix?: string,
-    fileName?: string
+    fileName?: string,
+    tenantId: string = 'default'
   ): Promise<string> {
     try {
-      const history = this.conversationHistory.get(jid) || [];
+      const historyKey = `${tenantId}:${jid}`;
+      const history = this.conversationHistory.get(historyKey) || [];
       const knowledgeRepo = getKnowledgeRepository();
       const knowledgeContext = knowledgeRepo.getFormattedKnowledge(jid);
       const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + this.getImageInstructions();
@@ -313,7 +318,7 @@ export class GeminiService {
         history.shift();
       }
 
-      this.conversationHistory.set(jid, history);
+      this.conversationHistory.set(historyKey, history);
       return responseText;
     } catch (error) {
       logger.error('Gemini document analysis error:', error);
@@ -458,9 +463,10 @@ export class GeminiService {
     }
   }
 
-  clearHistory(jid: string): void {
-    this.conversationHistory.delete(jid);
-    logger.info(`Cleared conversation history for ${jid}`);
+  clearHistory(jid: string, tenantId: string = 'default'): void {
+    const historyKey = `${tenantId}:${jid}`;
+    this.conversationHistory.delete(historyKey);
+    logger.info(`Cleared conversation history for ${historyKey}`);
   }
 
   clearAllHistory(): void {

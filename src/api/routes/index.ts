@@ -12,6 +12,7 @@ import { createStatsRoutes } from './stats.routes.js';
 import { createBotControlRoutes } from './bot-control.routes.js';
 import { createBirthdaysRoutes } from './birthdays.routes.js';
 import { createKnowledgeRoutes } from './knowledge.routes.js';
+import { createTenantsRoutes } from './tenants.routes.js';
 
 export function createRoutes(
   whatsapp: WhatsAppService,
@@ -30,6 +31,7 @@ export function createRoutes(
   router.use('/bot-control', createBotControlRoutes(botControl, whatsapp));
   router.use('/birthdays', createBirthdaysRoutes(birthdayService));
   router.use('/knowledge', createKnowledgeRoutes());
+  router.use('/tenants', createTenantsRoutes());
 
   return router;
 }

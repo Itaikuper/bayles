@@ -7,6 +7,7 @@ import { createStatsRoutes } from './stats.routes.js';
 import { createBotControlRoutes } from './bot-control.routes.js';
 import { createBirthdaysRoutes } from './birthdays.routes.js';
 import { createKnowledgeRoutes } from './knowledge.routes.js';
+import { createTenantsRoutes } from './tenants.routes.js';
 export function createRoutes(whatsapp, gemini, scheduler, botControl, birthdayService) {
     const router = Router();
     router.use('/groups', createGroupsRoutes(whatsapp));
@@ -17,5 +18,6 @@ export function createRoutes(whatsapp, gemini, scheduler, botControl, birthdaySe
     router.use('/bot-control', createBotControlRoutes(botControl, whatsapp));
     router.use('/birthdays', createBirthdaysRoutes(birthdayService));
     router.use('/knowledge', createKnowledgeRoutes());
+    router.use('/tenants', createTenantsRoutes());
     return router;
 }
