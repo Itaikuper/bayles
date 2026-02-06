@@ -125,7 +125,20 @@ export class MessageHandler {
                 ? `[${message.pushName}]: ${cleanText}`
                 : cleanText;
             const response = await this.gemini.generateResponse(jid, messageForAI, decision.customPrompt);
-            await this.sendResponse(jid, response, message);
+            // Handle function calls (e.g., scheduling)
+            if (response.type === 'function_call' && response.functionCall) {
+                if (response.functionCall.name === 'create_schedule') {
+                    const scheduleArgs = response.functionCall.args;
+                    await this.handleScheduleFunctionCall(jid, scheduleArgs, message);
+                    return;
+                }
+                // Unknown function call - log and ignore
+                logger.warn(`Unknown function call: ${response.functionCall.name}`);
+            }
+            // Handle regular text response
+            if (response.text) {
+                await this.sendResponse(jid, response.text, message);
+            }
         }
         catch (error) {
             logger.error('Error generating response:', error);
@@ -448,6 +461,127 @@ export class MessageHandler {
             .map((s, i) => `${i + 1}. ${s.useAi ? '[AI] ' : ''}ID: ${s.id}\n   To: ${s.jid}\n   Cron: ${s.cronExpression}\n   ${s.useAi ? 'Prompt' : 'Message'}: ${s.message.substring(0, 50)}${s.message.length > 50 ? '...' : ''}`)
             .join('\n\n');
         await this.whatsapp.sendReply(jid, `*Scheduled Messages:*\n\n${list}`, originalMessage);
+    }
+    /**
+     * Handle natural language schedule requests via Gemini function calling
+     */
+    async handleScheduleFunctionCall(jid, args, originalMessage) {
+        try {
+            // Resolve target - find group by name or use current chat
+            const targetJid = await this.resolveScheduleTarget(args.targetName, jid);
+            const targetName = await this.getTargetDisplayName(targetJid);
+            let scheduleId;
+            let scheduleDescription;
+            if (args.days && args.days.length > 0) {
+                // Recurring schedule
+                const cronExpression = this.buildCronExpression(args.hour, args.minute, args.days);
+                scheduleId = this.scheduler.scheduleMessage(targetJid, args.message, cronExpression, false, args.useAi);
+                scheduleDescription = this.formatDaysDescription(args.days, args.hour, args.minute);
+            }
+            else if (args.oneTimeDate) {
+                // One-time schedule
+                const scheduledDate = new Date(`${args.oneTimeDate}T${String(args.hour).padStart(2, '0')}:${String(args.minute).padStart(2, '0')}:00`);
+                if (scheduledDate <= new Date()) {
+                    await this.whatsapp.sendReply(jid, '❌ התאריך כבר עבר. נסה תאריך עתידי.', originalMessage);
+                    return;
+                }
+                scheduleId = this.scheduler.scheduleOneTimeMessage(targetJid, args.message, scheduledDate, args.useAi);
+                scheduleDescription = `${args.oneTimeDate} ב-${String(args.hour).padStart(2, '0')}:${String(args.minute).padStart(2, '0')}`;
+            }
+            else {
+                await this.whatsapp.sendReply(jid, '❌ לא הצלחתי להבין מתי לשלוח. נסה לציין ימים או תאריך.', originalMessage);
+                return;
+            }
+            // Build confirmation message
+            const targetText = targetJid === jid ? 'כאן' : targetName;
+            const typeText = args.useAi ? '🤖 AI (תוכן חדש בכל פעם)' : '📝 טקסט קבוע';
+            const confirmation = `✅ *תזמנתי!*
+
+📍 יעד: ${targetText}
+⏰ מתי: ${scheduleDescription}
+${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 ? args.message.substring(0, 100) + '...' : args.message}"
+📋 סוג: ${typeText}
+🔑 ID: ${scheduleId}`;
+            await this.whatsapp.sendReply(jid, confirmation, originalMessage);
+            logger.info(`Natural language schedule created: ${scheduleId} for ${targetJid}`);
+        }
+        catch (error) {
+            logger.error('Error creating schedule from function call:', error);
+            await this.whatsapp.sendReply(jid, `❌ שגיאה ביצירת התזמון: ${error instanceof Error ? error.message : 'שגיאה לא ידועה'}`, originalMessage);
+        }
+    }
+    /**
+     * Resolve target name to JID - search in bot's groups or use current chat
+     */
+    async resolveScheduleTarget(targetName, currentJid) {
+        // Self references
+        const selfKeywords = ['self', 'לי', 'לעצמי', 'אלי', 'פה', 'כאן'];
+        if (selfKeywords.includes(targetName.toLowerCase())) {
+            return currentJid;
+        }
+        // Search in groups
+        try {
+            const groups = await this.whatsapp.getGroups();
+            const normalizedTarget = targetName.toLowerCase().replace(/קבוצת\s*/i, '');
+            // Try exact match first
+            let match = groups.find(g => g.name.toLowerCase() === normalizedTarget);
+            // Try partial match
+            if (!match) {
+                match = groups.find(g => g.name.toLowerCase().includes(normalizedTarget) ||
+                    normalizedTarget.includes(g.name.toLowerCase()));
+            }
+            if (match) {
+                logger.info(`Resolved target "${targetName}" to group ${match.name} (${match.id})`);
+                return match.id;
+            }
+        }
+        catch (error) {
+            logger.warn('Error searching groups for target:', error);
+        }
+        // Fallback to current chat
+        logger.info(`Could not find target "${targetName}", using current chat ${currentJid}`);
+        return currentJid;
+    }
+    /**
+     * Get display name for a JID (group name or contact name)
+     */
+    async getTargetDisplayName(targetJid) {
+        if (targetJid.endsWith('@g.us')) {
+            try {
+                const groups = await this.whatsapp.getGroups();
+                const group = groups.find(g => g.id === targetJid);
+                if (group)
+                    return group.name;
+            }
+            catch { /* ignore */ }
+        }
+        const config = this.botControl.getChatConfig(targetJid);
+        return config?.display_name || targetJid;
+    }
+    /**
+     * Build cron expression from hour, minute, and days array
+     */
+    buildCronExpression(hour, minute, days) {
+        const daysPart = days.length === 7 ? '*' : days.join(',');
+        return `${minute} ${hour} * * ${daysPart}`;
+    }
+    /**
+     * Format days array to human readable Hebrew description
+     */
+    formatDaysDescription(days, hour, minute) {
+        const dayNames = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+        const timeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+        if (days.length === 7) {
+            return `כל יום ב-${timeStr}`;
+        }
+        if (days.length === 5 && [0, 1, 2, 3, 4].every(d => days.includes(d))) {
+            return `ימי חול ב-${timeStr}`;
+        }
+        if (days.length === 1) {
+            return `כל יום ${dayNames[days[0]]} ב-${timeStr}`;
+        }
+        const daysList = days.map(d => dayNames[d]).join(', ');
+        return `בימים ${daysList} ב-${timeStr}`;
     }
     async handleBirthdaysCommand(jid, args, originalMessage) {
         const subCommand = args[0]?.toLowerCase();

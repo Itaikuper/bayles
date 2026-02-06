@@ -97,7 +97,8 @@ export class BirthdayService {
         'Do NOT add any conversational prefix like "Sure!", "Here it is:", etc. ' +
         'Just produce the birthday greeting directly.';
 
-      return await this.gemini.generateResponse(`birthday:${birthday.jid}`, prompt, systemPrompt);
+      const response = await this.gemini.generateResponse(`birthday:${birthday.jid}`, prompt, systemPrompt);
+      return response.text || `יום הולדת שמח ${birthday.person_name}!`;
     } catch (error) {
       logger.error('Failed to generate AI birthday message:', error);
       return `יום הולדת שמח ${birthday.person_name}! מאחלים לך שנה מדהימה מלאה באושר ובריאות!`;
@@ -128,9 +129,10 @@ export class BirthdayService {
     const systemPrompt =
       'You extract birthday data from text. Output ONLY a valid JSON array, nothing else.';
 
-    const response = await this.gemini.generateResponse(`birthday-parser:${jid}`, prompt, systemPrompt);
+    const geminiResponse = await this.gemini.generateResponse(`birthday-parser:${jid}`, prompt, systemPrompt);
+    const responseText = geminiResponse.text || '';
 
-    const jsonMatch = response.match(/\[[\s\S]*\]/);
+    const jsonMatch = responseText.match(/\[[\s\S]*\]/);
     if (!jsonMatch) {
       throw new Error('לא הצלחתי להבין את הרשימה. נסה פורמט כמו: "שם 5 פבר, שם2 15/03"');
     }

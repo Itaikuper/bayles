@@ -1,10 +1,50 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
 import { spawnSync } from 'child_process';
 import { writeFileSync, readFileSync, unlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
+// Function declaration for natural language scheduling
+const createScheduleDeclaration = {
+    name: 'create_schedule',
+    description: 'Create a scheduled message. Use when user asks to schedule, remind, or send messages at specific times. Keywords: תזמן, תזכיר, תשלח בשעה, כל יום, מחר, schedule, remind.',
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            targetName: {
+                type: Type.STRING,
+                description: 'Target: group name in Hebrew/English, or "self" for current chat. Examples: "קבוצת המשפחה", "self", "לי"',
+            },
+            hour: {
+                type: Type.NUMBER,
+                description: 'Hour in 24h format (0-23)',
+            },
+            minute: {
+                type: Type.NUMBER,
+                description: 'Minute (0-59). Default to 0 if not specified.',
+            },
+            days: {
+                type: Type.ARRAY,
+                items: { type: Type.NUMBER },
+                description: 'Days of week for recurring: 0=Sunday, 1=Monday...6=Saturday. Use [0,1,2,3,4,5,6] for "every day", [0,1,2,3,4] for weekdays. Leave empty/null for one-time.',
+            },
+            oneTimeDate: {
+                type: Type.STRING,
+                description: 'ISO date (YYYY-MM-DD) for one-time schedule. Use for "tomorrow", "next Monday", specific dates. Calculate from today.',
+            },
+            message: {
+                type: Type.STRING,
+                description: 'Message content to send. Extract the actual message from user request.',
+            },
+            useAi: {
+                type: Type.BOOLEAN,
+                description: 'true if message is a prompt for AI to generate new content each time (e.g., "תייצר ציטוט", "כתוב בדיחה"). false for fixed messages.',
+            },
+        },
+        required: ['targetName', 'hour', 'minute', 'message', 'useAi'],
+    },
+};
 export class GeminiService {
     ai;
     conversationHistory = new Map();
@@ -46,17 +86,23 @@ export class GeminiService {
             const history = this.conversationHistory.get(jid) || [];
             // Use custom prompt if provided, otherwise use default
             const systemPrompt = (customPrompt || config.systemPrompt) + this.getImageInstructions();
-            // Create chat with history, system instruction, and Google Search
+            // Get today's date for scheduling context
+            const today = new Date();
+            const dateContext = `Today is ${today.toISOString().split('T')[0]} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][today.getDay()]}).`;
+            // Create chat with history, system instruction, Google Search, and scheduling function
             const chat = this.ai.chats.create({
                 model: config.geminiModel,
                 config: {
-                    tools: [{ googleSearch: {} }], // Enable Google Search for real-time info
+                    tools: [
+                        { googleSearch: {} },
+                        { functionDeclarations: [createScheduleDeclaration] },
+                    ],
                 },
                 history: [
                     // Add system instruction as first message pair
                     {
                         role: 'user',
-                        parts: [{ text: `System instruction: ${systemPrompt}` }],
+                        parts: [{ text: `System instruction: ${systemPrompt}\n\n${dateContext}` }],
                     },
                     {
                         role: 'model',
@@ -69,6 +115,21 @@ export class GeminiService {
             const response = await chat.sendMessage({
                 message: userMessage,
             });
+            // Check for function calls first
+            if (response.functionCalls && response.functionCalls.length > 0) {
+                const functionCall = response.functionCalls[0];
+                if (functionCall.name) {
+                    logger.info(`Function call detected: ${functionCall.name}`, functionCall.args);
+                    // Don't update history for function calls (the action will be handled separately)
+                    return {
+                        type: 'function_call',
+                        functionCall: {
+                            name: functionCall.name,
+                            args: (functionCall.args || {}),
+                        },
+                    };
+                }
+            }
             const responseText = response.text || 'Sorry, I could not generate a response.';
             // Update history
             history.push({ role: 'user', parts: [{ text: userMessage }] }, { role: 'model', parts: [{ text: responseText }] });
@@ -77,11 +138,11 @@ export class GeminiService {
                 history.shift();
             }
             this.conversationHistory.set(jid, history);
-            return responseText;
+            return { type: 'text', text: responseText };
         }
         catch (error) {
             logger.error('Gemini API error:', error);
-            return 'Sorry, I encountered an error processing your request.';
+            return { type: 'text', text: 'Sorry, I encountered an error processing your request.' };
         }
     }
     async generateAudioResponse(jid, audioBuffer, mimeType, customPrompt, contextPrefix) {

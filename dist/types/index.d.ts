@@ -29,3 +29,20 @@ export interface ChatHistory {
         text: string;
     }[];
 }
+export interface ScheduleArgs {
+    targetName: string;
+    hour: number;
+    minute: number;
+    days?: number[];
+    oneTimeDate?: string;
+    message: string;
+    useAi: boolean;
+}
+export interface GeminiResponse {
+    type: 'text' | 'function_call';
+    text?: string;
+    functionCall?: {
+        name: string;
+        args: Record<string, unknown>;
+    };
+}

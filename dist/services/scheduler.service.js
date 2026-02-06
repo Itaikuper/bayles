@@ -23,7 +23,8 @@ export class SchedulerService {
                             'Output ONLY the requested content. ' +
                             'Do NOT add any conversational prefix, greeting, or introduction like "Sure!", "Here it is:", etc. ' +
                             'Just produce the content directly as instructed by the prompt.';
-                        textToSend = await this.gemini.generateResponse(schedulerJid, message, schedulerPrompt);
+                        const aiResponse = await this.gemini.generateResponse(schedulerJid, message, schedulerPrompt);
+                        textToSend = aiResponse.text || message;
                         logger.info(`AI processed scheduled message ${id} for ${jid}`);
                     }
                     catch (aiError) {

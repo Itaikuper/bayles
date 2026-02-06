@@ -26,6 +26,26 @@ export declare class MessageHandler {
     private handleGroupsCommand;
     private handleScheduleCommand;
     private handleListScheduledCommand;
+    /**
+     * Handle natural language schedule requests via Gemini function calling
+     */
+    private handleScheduleFunctionCall;
+    /**
+     * Resolve target name to JID - search in bot's groups or use current chat
+     */
+    private resolveScheduleTarget;
+    /**
+     * Get display name for a JID (group name or contact name)
+     */
+    private getTargetDisplayName;
+    /**
+     * Build cron expression from hour, minute, and days array
+     */
+    private buildCronExpression;
+    /**
+     * Format days array to human readable Hebrew description
+     */
+    private formatDaysDescription;
     private handleBirthdaysCommand;
     private extractImagePrompt;
     private handleImageGeneration;
