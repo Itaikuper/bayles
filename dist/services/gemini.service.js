@@ -90,13 +90,14 @@ export class GeminiService {
             const today = new Date();
             const dateContext = `Today is ${today.toISOString().split('T')[0]} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][today.getDay()]}).`;
             // Create chat with history, system instruction, Google Search, and scheduling function
+            // Note: googleSearch and functionDeclarations must be in the SAME Tool object
             const chat = this.ai.chats.create({
                 model: config.geminiModel,
                 config: {
-                    tools: [
-                        { googleSearch: {} },
-                        { functionDeclarations: [createScheduleDeclaration] },
-                    ],
+                    tools: [{
+                            googleSearch: {},
+                            functionDeclarations: [createScheduleDeclaration],
+                        }],
                 },
                 history: [
                     // Add system instruction as first message pair
