@@ -5,6 +5,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
+import { getKnowledgeRepository } from '../database/repositories/knowledge.repository.js';
 // Function declaration for natural language scheduling
 const createScheduleDeclaration = {
     name: 'create_schedule',
@@ -84,8 +85,11 @@ export class GeminiService {
         try {
             // Get or initialize conversation history
             const history = this.conversationHistory.get(jid) || [];
-            // Use custom prompt if provided, otherwise use default
-            const systemPrompt = (customPrompt || config.systemPrompt) + this.getImageInstructions();
+            // Get knowledge base for this chat
+            const knowledgeRepo = getKnowledgeRepository();
+            const knowledgeContext = knowledgeRepo.getFormattedKnowledge(jid);
+            // Use custom prompt if provided, otherwise use default, plus knowledge
+            const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + this.getImageInstructions();
             // Get today's date for scheduling context
             const today = new Date();
             const dateContext = `Today is ${today.toISOString().split('T')[0]} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][today.getDay()]}).`;
@@ -149,7 +153,9 @@ export class GeminiService {
     async generateAudioResponse(jid, audioBuffer, mimeType, customPrompt, contextPrefix) {
         try {
             const history = this.conversationHistory.get(jid) || [];
-            const systemPrompt = (customPrompt || config.systemPrompt) + this.getImageInstructions();
+            const knowledgeRepo = getKnowledgeRepository();
+            const knowledgeContext = knowledgeRepo.getFormattedKnowledge(jid);
+            const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + this.getImageInstructions();
             const chat = this.ai.chats.create({
                 model: config.geminiModel,
                 config: {
@@ -197,7 +203,9 @@ export class GeminiService {
     async generateDocumentAnalysisResponse(jid, mediaBuffer, mimeType, caption, customPrompt, contextPrefix, fileName) {
         try {
             const history = this.conversationHistory.get(jid) || [];
-            const systemPrompt = (customPrompt || config.systemPrompt) + this.getImageInstructions();
+            const knowledgeRepo = getKnowledgeRepository();
+            const knowledgeContext = knowledgeRepo.getFormattedKnowledge(jid);
+            const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + this.getImageInstructions();
             const chat = this.ai.chats.create({
                 model: config.geminiModel,
                 config: {

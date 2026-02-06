@@ -44,6 +44,7 @@ function Sidebar({ currentPage, setCurrentPage }) {
     { id: 'groups', label: 'קבוצות', icon: '👥' },
     { id: 'messages', label: 'הודעות', icon: '💬' },
     { id: 'ai', label: 'הגדרות AI', icon: '🤖' },
+    { id: 'personalities', label: 'אישיויות', icon: '🎭' },
   ];
 
   return (
@@ -1304,6 +1305,316 @@ function AISettings() {
   );
 }
 
+// Personalities Component - manages custom_prompt and knowledge base per chat
+function Personalities() {
+  const [chats, setChats] = useState([]);
+  const [selectedJid, setSelectedJid] = useState('');
+  const [selectedChat, setSelectedChat] = useState(null);
+  const [knowledge, setKnowledge] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  // Form states
+  const [customPrompt, setCustomPrompt] = useState('');
+  const [newItem, setNewItem] = useState({ title: '', content: '', category: 'general' });
+  const [editItem, setEditItem] = useState(null);
+
+  useEffect(() => {
+    loadChats();
+  }, []);
+
+  useEffect(() => {
+    if (selectedJid) {
+      loadChatDetails(selectedJid);
+      loadKnowledge(selectedJid);
+    }
+  }, [selectedJid]);
+
+  const loadChats = async () => {
+    try {
+      const data = await api.get('/bot-control/chats');
+      const enabled = data.filter(c => c.enabled && c.ai_mode === 'on');
+      setChats(enabled);
+      if (enabled.length > 0 && !selectedJid) {
+        setSelectedJid(enabled[0].jid);
+      }
+    } catch (err) {
+      console.error('Failed to load chats:', err);
+    }
+    setLoading(false);
+  };
+
+  const loadChatDetails = async (jid) => {
+    try {
+      const data = await api.get('/bot-control/chats');
+      const chat = data.find(c => c.jid === jid);
+      setSelectedChat(chat);
+      setCustomPrompt(chat?.custom_prompt || '');
+    } catch (err) {
+      console.error('Failed to load chat details:', err);
+    }
+  };
+
+  const loadKnowledge = async (jid) => {
+    try {
+      const data = await api.get(`/knowledge/${encodeURIComponent(jid)}`);
+      setKnowledge(data);
+    } catch (err) {
+      console.error('Failed to load knowledge:', err);
+      setKnowledge([]);
+    }
+  };
+
+  const savePrompt = async () => {
+    setSaving(true);
+    try {
+      await api.put(`/bot-control/chats/${encodeURIComponent(selectedJid)}`, {
+        custom_prompt: customPrompt || null,
+      });
+      alert('הפרומפט נשמר בהצלחה!');
+    } catch (err) {
+      alert('שגיאה בשמירה');
+    }
+    setSaving(false);
+  };
+
+  const addKnowledgeItem = async (e) => {
+    e.preventDefault();
+    if (!newItem.title.trim() || !newItem.content.trim()) return;
+
+    try {
+      await api.post('/knowledge', {
+        jid: selectedJid,
+        ...newItem,
+      });
+      setNewItem({ title: '', content: '', category: 'general' });
+      loadKnowledge(selectedJid);
+    } catch (err) {
+      alert('שגיאה בהוספת פריט');
+    }
+  };
+
+  const updateKnowledgeItem = async () => {
+    if (!editItem) return;
+    try {
+      await api.put(`/knowledge/${editItem.id}`, {
+        title: editItem.title,
+        content: editItem.content,
+        category: editItem.category,
+      });
+      setEditItem(null);
+      loadKnowledge(selectedJid);
+    } catch (err) {
+      alert('שגיאה בעדכון');
+    }
+  };
+
+  const deleteKnowledgeItem = async (id) => {
+    if (!confirm('האם למחוק פריט זה?')) return;
+    try {
+      await api.delete(`/knowledge/${id}`);
+      loadKnowledge(selectedJid);
+    } catch (err) {
+      alert('שגיאה במחיקה');
+    }
+  };
+
+  if (loading) return <div className="loading">טוען...</div>;
+
+  return (
+    <div>
+      <div className="header">
+        <h2>אישיויות ומאגר ידע</h2>
+      </div>
+
+      {/* Chat Selector */}
+      <div className="card">
+        <div className="card-header">
+          <h3>בחר צ׳אט</h3>
+        </div>
+        <div className="card-body">
+          <div className="form-group">
+            <label>הגדרות האישיות חלות על הצ׳אט שנבחר</label>
+            <select value={selectedJid} onChange={e => setSelectedJid(e.target.value)}>
+              {chats.map(c => (
+                <option key={c.jid} value={c.jid}>
+                  {c.display_name || c.jid} {c.is_group ? '(קבוצה)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          {chats.length === 0 && (
+            <div className="info-box">
+              אין צ׳אטים עם AI פעיל. הפעל AI ברשימה הלבנה כדי להגדיר אישיות.
+            </div>
+          )}
+        </div>
+      </div>
+
+      {selectedJid && (
+        <>
+          {/* Custom Prompt Section */}
+          <div className="card">
+            <div className="card-header">
+              <h3>פרומפט מותאם (אישיות)</h3>
+            </div>
+            <div className="card-body">
+              <div className="form-group">
+                <label>הוראות ייחודיות לצ׳אט זה (מחליף את הפרומפט הגלובלי)</label>
+                <textarea
+                  rows="5"
+                  value={customPrompt}
+                  onChange={e => setCustomPrompt(e.target.value)}
+                  placeholder="השאר ריק לשימוש בפרומפט הגלובלי..."
+                />
+              </div>
+              <button
+                className="btn btn-primary"
+                onClick={savePrompt}
+                disabled={saving}
+              >
+                {saving ? 'שומר...' : 'שמור פרומפט'}
+              </button>
+            </div>
+          </div>
+
+          {/* Knowledge Base Section */}
+          <div className="card">
+            <div className="card-header">
+              <h3>מאגר ידע ({knowledge.length} פריטים)</h3>
+            </div>
+            <div className="card-body">
+              <div className="info-box" style={{marginBottom: '16px'}}>
+                פריטי הידע מוזרקים אוטומטית לפרומפט של ה-AI. השתמש בזה להוסיף מידע קבוע כמו שעות פעילות, מחירון, FAQ וכו׳.
+              </div>
+
+              {/* Add new item form */}
+              <div style={{marginBottom: '20px', padding: '16px', background: '#f5f5f5', borderRadius: '8px'}}>
+                <h4 style={{marginTop: 0}}>הוסף פריט חדש</h4>
+                <div className="form-group">
+                  <label>כותרת</label>
+                  <input
+                    type="text"
+                    value={newItem.title}
+                    onChange={e => setNewItem({...newItem, title: e.target.value})}
+                    placeholder="לדוגמה: שעות פעילות"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>תוכן</label>
+                  <textarea
+                    value={newItem.content}
+                    onChange={e => setNewItem({...newItem, content: e.target.value})}
+                    placeholder="המידע עצמו..."
+                  />
+                </div>
+                <div className="form-group">
+                  <label>קטגוריה (אופציונלי)</label>
+                  <input
+                    type="text"
+                    value={newItem.category}
+                    onChange={e => setNewItem({...newItem, category: e.target.value})}
+                    placeholder="general"
+                  />
+                </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={addKnowledgeItem}
+                  disabled={!newItem.title.trim() || !newItem.content.trim()}
+                >
+                  הוסף פריט
+                </button>
+              </div>
+
+              {/* Knowledge items list */}
+              {knowledge.length === 0 ? (
+                <div className="empty-state">אין פריטי ידע. הוסף מידע שה-AI צריך לדעת.</div>
+              ) : (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>כותרת</th>
+                      <th>קטגוריה</th>
+                      <th>תוכן</th>
+                      <th>פעולות</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {knowledge.map(item => (
+                      <tr key={item.id}>
+                        <td>{item.title}</td>
+                        <td><span className="badge badge-info">{item.category}</span></td>
+                        <td className="message-preview">{item.content.substring(0, 100)}{item.content.length > 100 ? '...' : ''}</td>
+                        <td>
+                          <button
+                            className="btn btn-small btn-primary"
+                            onClick={() => setEditItem({...item})}
+                            style={{marginLeft: '4px'}}
+                          >
+                            ערוך
+                          </button>
+                          <button
+                            className="btn btn-small btn-danger"
+                            onClick={() => deleteKnowledgeItem(item.id)}
+                          >
+                            מחק
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Edit Modal */}
+      {editItem && (
+        <div className="modal-overlay" onClick={() => setEditItem(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>עריכת פריט ידע</h3>
+              <button className="modal-close" onClick={() => setEditItem(null)}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label>כותרת</label>
+                <input
+                  type="text"
+                  value={editItem.title}
+                  onChange={e => setEditItem({...editItem, title: e.target.value})}
+                />
+              </div>
+              <div className="form-group">
+                <label>תוכן</label>
+                <textarea
+                  rows="5"
+                  value={editItem.content}
+                  onChange={e => setEditItem({...editItem, content: e.target.value})}
+                />
+              </div>
+              <div className="form-group">
+                <label>קטגוריה</label>
+                <input
+                  type="text"
+                  value={editItem.category}
+                  onChange={e => setEditItem({...editItem, category: e.target.value})}
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setEditItem(null)}>ביטול</button>
+              <button className="btn btn-primary" onClick={updateKnowledgeItem}>שמור</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Main App Component
 // Birthdays Component
 const MONTH_NAMES = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
@@ -1539,6 +1850,7 @@ function App() {
       case 'groups': return <Groups />;
       case 'messages': return <Messages />;
       case 'ai': return <AISettings />;
+      case 'personalities': return <Personalities />;
       default: return <Dashboard />;
     }
   };

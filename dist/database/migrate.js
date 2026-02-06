@@ -140,4 +140,23 @@ export function runMigrations() {
         db.prepare('INSERT INTO migrations (name) VALUES (?)').run('004_birthdays');
         logger.info('Migration 004_birthdays completed');
     }
+    // Migration 005: Knowledge base for per-chat context
+    const applied005 = db.prepare('SELECT name FROM migrations WHERE name = ?').get('005_knowledge_base');
+    if (!applied005) {
+        logger.info('Running migration: 005_knowledge_base');
+        db.exec(`
+      CREATE TABLE IF NOT EXISTS knowledge_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        jid TEXT NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        category TEXT DEFAULT 'general',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_knowledge_items_jid ON knowledge_items(jid)`);
+        db.prepare('INSERT INTO migrations (name) VALUES (?)').run('005_knowledge_base');
+        logger.info('Migration 005_knowledge_base completed');
+    }
 }

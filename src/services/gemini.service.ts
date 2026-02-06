@@ -6,6 +6,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
+import { getKnowledgeRepository } from '../database/repositories/knowledge.repository.js';
 import type { ChatHistory, GeminiResponse } from '../types/index.js';
 
 // Function declaration for natural language scheduling
@@ -91,8 +92,12 @@ export class GeminiService {
       // Get or initialize conversation history
       const history = this.conversationHistory.get(jid) || [];
 
-      // Use custom prompt if provided, otherwise use default
-      const systemPrompt = (customPrompt || config.systemPrompt) + this.getImageInstructions();
+      // Get knowledge base for this chat
+      const knowledgeRepo = getKnowledgeRepository();
+      const knowledgeContext = knowledgeRepo.getFormattedKnowledge(jid);
+
+      // Use custom prompt if provided, otherwise use default, plus knowledge
+      const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + this.getImageInstructions();
 
       // Get today's date for scheduling context
       const today = new Date();
@@ -176,7 +181,9 @@ export class GeminiService {
   ): Promise<string> {
     try {
       const history = this.conversationHistory.get(jid) || [];
-      const systemPrompt = (customPrompt || config.systemPrompt) + this.getImageInstructions();
+      const knowledgeRepo = getKnowledgeRepository();
+      const knowledgeContext = knowledgeRepo.getFormattedKnowledge(jid);
+      const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + this.getImageInstructions();
 
       const chat = this.ai.chats.create({
         model: config.geminiModel,
@@ -242,7 +249,9 @@ export class GeminiService {
   ): Promise<string> {
     try {
       const history = this.conversationHistory.get(jid) || [];
-      const systemPrompt = (customPrompt || config.systemPrompt) + this.getImageInstructions();
+      const knowledgeRepo = getKnowledgeRepository();
+      const knowledgeContext = knowledgeRepo.getFormattedKnowledge(jid);
+      const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + this.getImageInstructions();
 
       const chat = this.ai.chats.create({
         model: config.geminiModel,
