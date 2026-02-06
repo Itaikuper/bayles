@@ -467,6 +467,27 @@ export class MessageHandler {
      */
     async handleScheduleFunctionCall(jid, args, originalMessage) {
         try {
+            // Normalize hour/minute - Gemini sometimes returns 14.25 instead of hour=14, minute=25
+            let hour = Math.floor(args.hour);
+            let minute = args.minute ?? 0;
+            // If hour has decimal (e.g., 14.25), extract minutes from it
+            if (args.hour !== hour) {
+                const decimalPart = args.hour - hour;
+                // Check if it looks like HH.MM format (e.g., 14.25 = 14:25)
+                if (decimalPart > 0 && decimalPart < 1) {
+                    const possibleMinute = Math.round(decimalPart * 100);
+                    if (possibleMinute < 60) {
+                        minute = possibleMinute;
+                    }
+                }
+            }
+            // Ensure minute is valid
+            minute = Math.floor(minute);
+            if (isNaN(hour) || isNaN(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+                await this.whatsapp.sendReply(jid, '❌ שעה לא תקינה. נסה פורמט כמו: 14:30 או 9 בבוקר', originalMessage);
+                return;
+            }
+            logger.info(`Normalized time: ${hour}:${minute} (original: hour=${args.hour}, minute=${args.minute})`);
             // Resolve target - find group by name or use current chat
             const targetJid = await this.resolveScheduleTarget(args.targetName, jid);
             const targetName = await this.getTargetDisplayName(targetJid);
@@ -474,19 +495,19 @@ export class MessageHandler {
             let scheduleDescription;
             if (args.days && args.days.length > 0) {
                 // Recurring schedule
-                const cronExpression = this.buildCronExpression(args.hour, args.minute, args.days);
+                const cronExpression = this.buildCronExpression(hour, minute, args.days);
                 scheduleId = this.scheduler.scheduleMessage(targetJid, args.message, cronExpression, false, args.useAi);
-                scheduleDescription = this.formatDaysDescription(args.days, args.hour, args.minute);
+                scheduleDescription = this.formatDaysDescription(args.days, hour, minute);
             }
             else if (args.oneTimeDate) {
                 // One-time schedule
-                const scheduledDate = new Date(`${args.oneTimeDate}T${String(args.hour).padStart(2, '0')}:${String(args.minute).padStart(2, '0')}:00`);
+                const scheduledDate = new Date(`${args.oneTimeDate}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`);
                 if (scheduledDate <= new Date()) {
                     await this.whatsapp.sendReply(jid, '❌ התאריך כבר עבר. נסה תאריך עתידי.', originalMessage);
                     return;
                 }
                 scheduleId = this.scheduler.scheduleOneTimeMessage(targetJid, args.message, scheduledDate, args.useAi);
-                scheduleDescription = `${args.oneTimeDate} ב-${String(args.hour).padStart(2, '0')}:${String(args.minute).padStart(2, '0')}`;
+                scheduleDescription = `${args.oneTimeDate} ב-${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
             }
             else {
                 await this.whatsapp.sendReply(jid, '❌ לא הצלחתי להבין מתי לשלוח. נסה לציין ימים או תאריך.', originalMessage);
