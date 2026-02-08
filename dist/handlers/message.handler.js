@@ -127,7 +127,7 @@ export class MessageHandler {
             const messageForAI = isGroup && message.pushName
                 ? `[${message.pushName}]: ${cleanText}`
                 : cleanText;
-            const response = await this.gemini.generateResponse(jid, messageForAI, decision.customPrompt);
+            const response = await this.gemini.generateResponse(jid, messageForAI, decision.customPrompt, 'default', sender || undefined);
             // Handle function calls (e.g., scheduling)
             if (response.type === 'function_call' && response.functionCall) {
                 if (response.functionCall.name === 'create_schedule') {
@@ -151,6 +151,10 @@ export class MessageHandler {
             // Handle regular text response
             if (response.text) {
                 await this.sendResponse(jid, response.text, message);
+                // Extract user facts asynchronously (non-blocking)
+                const senderJid = sender || jid;
+                this.gemini.extractUserFacts(senderJid, cleanText, response.text)
+                    .catch(err => logger.warn('[memory] Extraction failed:', err));
             }
         }
         catch (error) {

@@ -165,7 +165,9 @@ export class MessageHandler {
       const response = await this.gemini.generateResponse(
         jid,
         messageForAI,
-        decision.customPrompt
+        decision.customPrompt,
+        'default',
+        sender || undefined
       );
 
       // Handle function calls (e.g., scheduling)
@@ -192,6 +194,11 @@ export class MessageHandler {
       // Handle regular text response
       if (response.text) {
         await this.sendResponse(jid, response.text, message);
+
+        // Extract user facts asynchronously (non-blocking)
+        const senderJid = sender || jid;
+        this.gemini.extractUserFacts(senderJid, cleanText, response.text)
+          .catch(err => logger.warn('[memory] Extraction failed:', err));
       }
     } catch (error) {
       logger.error('Error generating response:', error);

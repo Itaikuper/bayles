@@ -233,4 +233,24 @@ export function runMigrations() {
         db.prepare('INSERT INTO migrations (name) VALUES (?)').run('007_songs_contacts');
         logger.info('Migration 007_songs_contacts completed');
     }
+    // Migration 008: User memories (persistent per-user facts)
+    const applied008 = db.prepare('SELECT name FROM migrations WHERE name = ?').get('008_user_memories');
+    if (!applied008) {
+        logger.info('Running migration: 008_user_memories');
+        db.exec(`
+      CREATE TABLE IF NOT EXISTS user_memories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        jid TEXT NOT NULL,
+        fact TEXT NOT NULL,
+        category TEXT DEFAULT 'personal',
+        tenant_id TEXT DEFAULT 'default',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_user_memories_jid ON user_memories(jid)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_user_memories_tenant ON user_memories(tenant_id)`);
+        db.prepare('INSERT INTO migrations (name) VALUES (?)').run('008_user_memories');
+        logger.info('Migration 008_user_memories completed');
+    }
 }

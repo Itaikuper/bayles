@@ -6,6 +6,7 @@ import { join } from 'path';
 import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { getKnowledgeRepository } from '../database/repositories/knowledge.repository.js';
+import { getUserMemoryRepository } from '../database/repositories/user-memory.repository.js';
 // Function declaration for natural language scheduling
 const createScheduleDeclaration = {
     name: 'create_schedule',
@@ -111,7 +112,7 @@ export class GeminiService {
 3. טקסט בעברית בתמונה = PRO_IMAGE.
 4. מקסימום תגית אחת בתשובה.`;
     }
-    async generateResponse(jid, userMessage, customPrompt, tenantId = 'default') {
+    async generateResponse(jid, userMessage, customPrompt, tenantId = 'default', senderJid) {
         try {
             // Get or initialize conversation history (scoped by tenant)
             const historyKey = `${tenantId}:${jid}`;
@@ -119,8 +120,11 @@ export class GeminiService {
             // Get knowledge base for this chat
             const knowledgeRepo = getKnowledgeRepository();
             const knowledgeContext = knowledgeRepo.getFormattedKnowledge(jid);
-            // Use custom prompt if provided, otherwise use default, plus knowledge
-            const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + this.getImageInstructions();
+            // Get user memories for the sender (not the group JID)
+            const memoryRepo = getUserMemoryRepository();
+            const userMemories = memoryRepo.getFormattedMemories(senderJid || jid, tenantId);
+            // Use custom prompt if provided, otherwise use default, plus knowledge + memories
+            const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + userMemories + this.getImageInstructions();
             // Get today's date for scheduling context
             const today = new Date();
             const dateContext = `Today is ${today.toISOString().split('T')[0]} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][today.getDay()]}).`;
@@ -437,6 +441,64 @@ export class GeminiService {
         catch (error) {
             logger.error('Gemini scheduled content error:', error);
             throw error;
+        }
+    }
+    /**
+     * Extract persistent facts about the user from a conversation exchange.
+     * Runs asynchronously after sending the AI response - does not block.
+     */
+    async extractUserFacts(senderJid, userMessage, botResponse, tenantId = 'default') {
+        try {
+            const memoryRepo = getUserMemoryRepository();
+            const existingFacts = memoryRepo.getByJid(senderJid, tenantId);
+            const existingList = existingFacts.map(f => f.fact).join('\n');
+            const prompt = `You analyze conversations and extract persistent personal facts about the user.
+
+Existing facts about this user:
+${existingList || '(none yet)'}
+
+Latest exchange:
+User: ${userMessage}
+Bot: ${botResponse}
+
+Instructions:
+- Extract ONLY persistent personal facts (name, location, family, job, hobbies, preferences, etc.)
+- Ignore: temporary states ("I'm tired"), questions, greetings, opinions about current events
+- If a new fact UPDATES an existing one (e.g., moved cities), return it as an update
+- Return ONLY a JSON array. Each item: {"action":"add"|"update","fact":"...","update_id":number|null}
+- update_id is the ID of the existing fact to replace (from the list above), null for new facts
+- If there are NO new facts to extract, return an empty array: []
+- Keep facts concise (one short sentence each)
+- Write facts in the SAME LANGUAGE the user used
+
+Respond with ONLY the JSON array, nothing else.`;
+            const response = await this.ai.models.generateContent({
+                model: 'gemini-2.0-flash',
+                contents: prompt,
+            });
+            const text = response.text?.trim();
+            if (!text || text === '[]')
+                return;
+            // Parse JSON from response
+            const jsonMatch = text.match(/\[[\s\S]*\]/);
+            if (!jsonMatch)
+                return;
+            const facts = JSON.parse(jsonMatch[0]);
+            for (const item of facts) {
+                if (!item.fact || item.fact.length < 3)
+                    continue;
+                if (item.action === 'update' && item.update_id) {
+                    memoryRepo.update(item.update_id, item.fact);
+                    logger.info(`[memory] Updated fact #${item.update_id} for ${senderJid}: ${item.fact}`);
+                }
+                else {
+                    memoryRepo.create(senderJid, item.fact, 'personal', tenantId);
+                    logger.info(`[memory] New fact for ${senderJid}: ${item.fact}`);
+                }
+            }
+        }
+        catch (error) {
+            logger.warn('[memory] Extraction failed:', error);
         }
     }
     clearHistory(jid, tenantId = 'default') {
