@@ -104,15 +104,20 @@ export class GeminiService {
       const today = new Date();
       const dateContext = `Today is ${today.toISOString().split('T')[0]} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][today.getDay()]}).`;
 
-      // Create chat with history, system instruction, and scheduling function
+      // Only enable scheduling function when message looks like a scheduling request
+      // Otherwise use googleSearch for regular queries (weather, current events, etc.)
       // Note: googleSearch and functionDeclarations DON'T work together (known SDK bug)
-      // See: https://github.com/google-gemini/deprecated-generative-ai-js/issues/433
+      const schedulingKeywords = /תזמן|תזכיר|תשלח בשעה|כל יום|מחר בשעה|schedule|remind|תקבע|הזכר לי|בשעה \d/i;
+      const isSchedulingRequest = schedulingKeywords.test(userMessage);
+
+      const tools = isSchedulingRequest
+        ? [{ functionDeclarations: [createScheduleDeclaration] }]
+        : [{ googleSearch: {} }];
+
       const chat = this.ai.chats.create({
         model: config.geminiModel,
         config: {
-          tools: [{
-            functionDeclarations: [createScheduleDeclaration],
-          }],
+          tools,
         },
         history: [
           // Add system instruction as first message pair
