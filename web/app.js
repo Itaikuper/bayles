@@ -46,6 +46,8 @@ function Sidebar({ currentPage, setCurrentPage }) {
     { id: 'ai', label: 'הגדרות AI', icon: '🤖' },
     { id: 'personalities', label: 'אישיויות', icon: '🎭' },
     { id: 'tenants', label: 'עסקים', icon: '🏢' },
+    { id: 'contacts', label: 'ספר טלפונים', icon: '📞' },
+    { id: 'songs', label: 'שירים', icon: '🎸' },
   ];
 
   return (
@@ -2126,6 +2128,233 @@ function Tenants() {
   );
 }
 
+function Contacts() {
+  const [contacts, setContacts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editingContact, setEditingContact] = useState(null);
+  const [form, setForm] = useState({ name: '', phone: '', notes: '', category: 'general' });
+  const [searchQuery, setSearchQuery] = useState('');
+
+  useEffect(() => {
+    loadContacts();
+  }, []);
+
+  const loadContacts = async () => {
+    try {
+      const data = await api.get('/contacts');
+      setContacts(data);
+    } catch (err) {
+      console.error('Failed to load contacts:', err);
+    }
+    setLoading(false);
+  };
+
+  const handleSubmit = async () => {
+    if (!form.name || !form.phone) return;
+    try {
+      if (editingContact) {
+        await api.put(`/contacts/${editingContact.id}`, form);
+      } else {
+        await api.post('/contacts', form);
+      }
+      setForm({ name: '', phone: '', notes: '', category: 'general' });
+      setShowForm(false);
+      setEditingContact(null);
+      loadContacts();
+    } catch (err) {
+      console.error('Failed to save contact:', err);
+    }
+  };
+
+  const handleEdit = (contact) => {
+    setForm({ name: contact.name, phone: contact.phone, notes: contact.notes || '', category: contact.category || 'general' });
+    setEditingContact(contact);
+    setShowForm(true);
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm('למחוק איש קשר?')) return;
+    try {
+      await api.delete(`/contacts/${id}`);
+      loadContacts();
+    } catch (err) {
+      console.error('Failed to delete contact:', err);
+    }
+  };
+
+  const filteredContacts = searchQuery
+    ? contacts.filter(c => c.name.includes(searchQuery) || c.phone.includes(searchQuery))
+    : contacts;
+
+  if (loading) return <div className="loading">טוען...</div>;
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <h2>📞 ספר טלפונים</h2>
+        <button className="btn btn-primary" onClick={() => { setShowForm(true); setEditingContact(null); setForm({ name: '', phone: '', notes: '', category: 'general' }); }}>
+          + הוסף איש קשר
+        </button>
+      </div>
+
+      <div style={{ marginBottom: '16px' }}>
+        <input
+          type="text"
+          placeholder="חיפוש לפי שם או טלפון..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="input"
+          style={{ maxWidth: '400px' }}
+        />
+      </div>
+
+      <div className="card">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>שם</th>
+              <th>טלפון</th>
+              <th>הערות</th>
+              <th>קטגוריה</th>
+              <th>פעולות</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredContacts.map(contact => (
+              <tr key={contact.id}>
+                <td><strong>{contact.name}</strong></td>
+                <td>{contact.phone}</td>
+                <td>{contact.notes || '-'}</td>
+                <td>{contact.category}</td>
+                <td>
+                  <button className="btn btn-secondary btn-sm" onClick={() => handleEdit(contact)}>ערוך</button>
+                  {' '}
+                  <button className="btn btn-danger btn-sm" onClick={() => handleDelete(contact.id)}>מחק</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {filteredContacts.length === 0 && <p style={{ textAlign: 'center', padding: '20px', color: '#888' }}>אין אנשי קשר</p>}
+      </div>
+
+      {showForm && (
+        <div className="modal-overlay" onClick={() => setShowForm(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h3>{editingContact ? 'עריכת איש קשר' : 'הוספת איש קשר'}</h3>
+            <div className="form-group">
+              <label>שם</label>
+              <input className="input" value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="שם מלא" />
+            </div>
+            <div className="form-group">
+              <label>טלפון</label>
+              <input className="input" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} placeholder="050-1234567" />
+            </div>
+            <div className="form-group">
+              <label>הערות</label>
+              <input className="input" value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} placeholder="הערות (אופציונלי)" />
+            </div>
+            <div className="form-group">
+              <label>קטגוריה</label>
+              <input className="input" value={form.category} onChange={e => setForm({...form, category: e.target.value})} placeholder="general" />
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-primary" onClick={handleSubmit}>{editingContact ? 'עדכן' : 'הוסף'}</button>
+              <button className="btn btn-secondary" onClick={() => setShowForm(false)}>ביטול</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Songs() {
+  const [songs, setSongs] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [totalCount, setTotalCount] = useState(0);
+
+  useEffect(() => {
+    loadStats();
+  }, []);
+
+  const loadStats = async () => {
+    try {
+      const data = await api.get('/songs/stats');
+      setTotalCount(data.count);
+    } catch (err) {
+      console.error('Failed to load song stats:', err);
+    }
+  };
+
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return;
+    setLoading(true);
+    try {
+      const data = await api.get(`/songs/search?q=${encodeURIComponent(searchQuery)}&limit=50`);
+      setSongs(data);
+    } catch (err) {
+      console.error('Failed to search songs:', err);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <h2>🎸 שירים ואקורדים</h2>
+        <span style={{ color: '#888' }}>{totalCount} שירים במאגר</span>
+      </div>
+
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+        <input
+          type="text"
+          placeholder="חיפוש שיר או זמר..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+          className="input"
+          style={{ maxWidth: '400px' }}
+        />
+        <button className="btn btn-primary" onClick={handleSearch}>חפש</button>
+      </div>
+
+      {loading && <div className="loading">מחפש...</div>}
+
+      {!loading && songs.length > 0 && (
+        <div className="card">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>שיר</th>
+                <th>זמר</th>
+                <th>Capo</th>
+                <th>לינק</th>
+              </tr>
+            </thead>
+            <tbody>
+              {songs.map(song => (
+                <tr key={song.id}>
+                  <td><strong>{song.title}</strong></td>
+                  <td>{song.artist}</td>
+                  <td>{song.capo || '-'}</td>
+                  <td><a href={song.url} target="_blank" rel="noopener noreferrer">פתח באתר</a></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {!loading && songs.length === 0 && searchQuery && (
+        <p style={{ textAlign: 'center', padding: '20px', color: '#888' }}>לא נמצאו שירים</p>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const [currentPage, setCurrentPage] = useState('dashboard');
 
@@ -2142,6 +2371,8 @@ function App() {
       case 'ai': return <AISettings />;
       case 'personalities': return <Personalities />;
       case 'tenants': return <Tenants />;
+      case 'contacts': return <Contacts />;
+      case 'songs': return <Songs />;
       default: return <Dashboard />;
     }
   };

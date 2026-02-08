@@ -1,6 +1,8 @@
 import { ScheduleRepository } from '../database/repositories/schedule.repository.js';
 import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
+import { getSongRepository } from '../database/repositories/song.repository.js';
+import { getContactRepository } from '../database/repositories/contact.repository.js';
 export class MessageHandler {
     whatsapp;
     gemini;
@@ -131,6 +133,16 @@ export class MessageHandler {
                 if (response.functionCall.name === 'create_schedule') {
                     const scheduleArgs = response.functionCall.args;
                     await this.handleScheduleFunctionCall(jid, scheduleArgs, message);
+                    return;
+                }
+                if (response.functionCall.name === 'search_song') {
+                    const args = response.functionCall.args;
+                    await this.handleSongSearch(jid, args.query, message);
+                    return;
+                }
+                if (response.functionCall.name === 'search_contact') {
+                    const args = response.functionCall.args;
+                    await this.handleContactSearch(jid, args.query, message);
                     return;
                 }
                 // Unknown function call - log and ignore
@@ -551,6 +563,46 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
             logger.error('Error creating schedule from function call:', error);
             await this.whatsapp.sendReply(jid, `❌ שגיאה ביצירת התזמון: ${error instanceof Error ? error.message : 'שגיאה לא ידועה'}`, originalMessage);
         }
+    }
+    /**
+     * Handle song search via Gemini function calling
+     */
+    async handleSongSearch(jid, query, originalMessage) {
+        const songRepo = getSongRepository();
+        const results = songRepo.search(query, 10);
+        if (results.length === 0) {
+            await this.whatsapp.sendReply(jid, `לא נמצאו שירים עבור "${query}". נסה חיפוש אחר.`, originalMessage);
+            return;
+        }
+        if (results.length === 1) {
+            const song = results[0];
+            let text = `🎸 *${song.title}* - ${song.artist}`;
+            if (song.capo)
+                text += `\nCapo: ${song.capo}`;
+            text += `\n\n${song.url}`;
+            await this.whatsapp.sendReply(jid, text, originalMessage);
+            return;
+        }
+        const list = results.map((s, i) => `${i + 1}. *${s.title}* - ${s.artist}`).join('\n');
+        await this.whatsapp.sendReply(jid, `נמצאו ${results.length} שירים:\n\n${list}\n\nכתוב את שם השיר המדויק לקבלת הלינק.`, originalMessage);
+    }
+    /**
+     * Handle contact search via Gemini function calling
+     */
+    async handleContactSearch(jid, query, originalMessage) {
+        const contactRepo = getContactRepository();
+        const results = contactRepo.search(query);
+        if (results.length === 0) {
+            await this.whatsapp.sendReply(jid, `לא נמצאו אנשי קשר עם השם "${query}".`, originalMessage);
+            return;
+        }
+        const list = results.map((c, i) => {
+            let line = `${i + 1}. *${c.name}*: ${c.phone}`;
+            if (c.notes)
+                line += ` (${c.notes})`;
+            return line;
+        }).join('\n');
+        await this.whatsapp.sendReply(jid, `📞 נמצאו ${results.length} אנשי קשר:\n\n${list}`, originalMessage);
     }
     /**
      * Resolve target name to JID - search in bot's groups or use current chat

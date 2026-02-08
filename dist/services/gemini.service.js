@@ -46,6 +46,36 @@ const createScheduleDeclaration = {
         required: ['targetName', 'hour', 'minute', 'message', 'useAi'],
     },
 };
+// Function declaration for song search
+const searchSongDeclaration = {
+    name: 'search_song',
+    description: 'Search for a song with chords/tabs. Use when user asks about a song, chords, tabs, guitar, or wants to play a song. Keywords: שיר, אקורדים, טאבים, גיטרה, chords, song, tabs, לנגן, תנגן, אקורד.',
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            query: {
+                type: Type.STRING,
+                description: 'Song title or artist name to search for. Can be partial. Examples: "סוף העולם", "שלמה ארצי", "בואי"',
+            },
+        },
+        required: ['query'],
+    },
+};
+// Function declaration for contact/phone book search
+const searchContactDeclaration = {
+    name: 'search_contact',
+    description: 'Search the phone book / contacts database. Use when user asks for a phone number, contact info, or wants to find someone. Keywords: מספר טלפון, טלפון של, פלאפון, איש קשר, phone, contact, number, מספר של.',
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            query: {
+                type: Type.STRING,
+                description: 'Name to search for. Can be partial. Examples: "דוד", "משה כהן", "המספרה"',
+            },
+        },
+        required: ['query'],
+    },
+};
 export class GeminiService {
     ai;
     conversationHistory = new Map();
@@ -94,13 +124,25 @@ export class GeminiService {
             // Get today's date for scheduling context
             const today = new Date();
             const dateContext = `Today is ${today.toISOString().split('T')[0]} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][today.getDay()]}).`;
-            // Only enable scheduling function when message looks like a scheduling request
+            // Only enable function calling when message matches known patterns
             // Otherwise use googleSearch for regular queries (weather, current events, etc.)
             // Note: googleSearch and functionDeclarations DON'T work together (known SDK bug)
             const schedulingKeywords = /תזמן|תזכיר|תשלח בשעה|כל יום|מחר בשעה|schedule|remind|תקבע|הזכר לי|בשעה \d/i;
+            const songKeywords = /שיר|אקורד|טאב|גיטרה|chord|song|tab|לנגן|תנגן|אקורד/i;
+            const contactKeywords = /טלפון|פלאפון|מספר של|איש קשר|phone|contact|number/i;
             const isSchedulingRequest = schedulingKeywords.test(userMessage);
-            const tools = isSchedulingRequest
-                ? [{ functionDeclarations: [createScheduleDeclaration] }]
+            const isSongRequest = songKeywords.test(userMessage);
+            const isContactRequest = contactKeywords.test(userMessage);
+            const isFunctionCallRequest = isSchedulingRequest || isSongRequest || isContactRequest;
+            const functionDeclarations = [];
+            if (isSchedulingRequest)
+                functionDeclarations.push(createScheduleDeclaration);
+            if (isSongRequest)
+                functionDeclarations.push(searchSongDeclaration);
+            if (isContactRequest)
+                functionDeclarations.push(searchContactDeclaration);
+            const tools = isFunctionCallRequest
+                ? [{ functionDeclarations }]
                 : [{ googleSearch: {} }];
             const chat = this.ai.chats.create({
                 model: config.geminiModel,

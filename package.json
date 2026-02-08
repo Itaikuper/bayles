@@ -8,7 +8,8 @@
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start:prod": "node dist/index.js"
+    "start:prod": "node dist/index.js",
+    "import-songs": "tsx src/scripts/import-songs.ts"
   },
   "keywords": [
     "whatsapp",

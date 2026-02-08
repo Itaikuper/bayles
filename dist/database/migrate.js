@@ -197,4 +197,40 @@ export function runMigrations() {
         db.prepare('INSERT INTO migrations (name) VALUES (?)').run('006_multi_tenant');
         logger.info('Migration 006_multi_tenant completed');
     }
+    // Migration 007: Songs database + Contacts (phone book)
+    const applied007 = db.prepare('SELECT name FROM migrations WHERE name = ?').get('007_songs_contacts');
+    if (!applied007) {
+        logger.info('Running migration: 007_songs_contacts');
+        // Songs table (read-only, imported from PlayAlong)
+        db.exec(`
+      CREATE TABLE IF NOT EXISTS songs (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        artist TEXT NOT NULL,
+        url TEXT NOT NULL,
+        capo INTEGER,
+        tenant_id TEXT DEFAULT 'default' REFERENCES tenants(id)
+      )
+    `);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_songs_title ON songs(title)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_songs_artist ON songs(artist)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_songs_tenant ON songs(tenant_id)`);
+        // Contacts table (phone book, managed via dashboard)
+        db.exec(`
+      CREATE TABLE IF NOT EXISTS contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        notes TEXT,
+        category TEXT DEFAULT 'general',
+        tenant_id TEXT DEFAULT 'default' REFERENCES tenants(id),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_contacts_name ON contacts(name)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_contacts_tenant ON contacts(tenant_id)`);
+        db.prepare('INSERT INTO migrations (name) VALUES (?)').run('007_songs_contacts');
+        logger.info('Migration 007_songs_contacts completed');
+    }
 }

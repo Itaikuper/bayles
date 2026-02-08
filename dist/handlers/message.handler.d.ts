@@ -31,6 +31,14 @@ export declare class MessageHandler {
      */
     private handleScheduleFunctionCall;
     /**
+     * Handle song search via Gemini function calling
+     */
+    private handleSongSearch;
+    /**
+     * Handle contact search via Gemini function calling
+     */
+    private handleContactSearch;
+    /**
      * Resolve target name to JID - search in bot's groups or use current chat
      */
     private resolveScheduleTarget;
