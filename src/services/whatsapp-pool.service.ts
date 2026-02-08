@@ -400,6 +400,8 @@ export class WhatsAppPoolService {
   async connectAllActive(): Promise<void> {
     const tenants = this.tenantRepo.getAll();
     for (const tenant of tenants) {
+      // Skip 'default' tenant - managed by WhatsAppService
+      if (tenant.id === 'default') continue;
       if (tenant.status !== 'disconnected') {
         try {
           await this.connect(tenant.id);
@@ -407,6 +409,12 @@ export class WhatsAppPoolService {
           logger.error(`[${tenant.id}] Failed to connect:`, err);
         }
       }
+    }
+  }
+
+  async disconnectAll(): Promise<void> {
+    for (const tenantId of this.connections.keys()) {
+      await this.disconnect(tenantId);
     }
   }
 }

@@ -31,6 +31,7 @@ export declare class WhatsAppPoolService {
     getBotJid(tenantId: string): string | null;
     getAllConnectedTenants(): string[];
     connectAllActive(): Promise<void>;
+    disconnectAll(): Promise<void>;
 }
 export declare function getWhatsAppPool(): WhatsAppPoolService;
 export {};

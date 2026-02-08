@@ -9,6 +9,9 @@ import { logger } from './utils/logger.js';
 import { createApiServer, startApiServer } from './api/server.js';
 import { runMigrations } from './database/migrate.js';
 import { closeDatabase, getDatabase } from './database/db.js';
+import { getWhatsAppPool } from './services/whatsapp-pool.service.js';
+import { getTenantRepository } from './database/repositories/tenant.repository.js';
+import { getKnowledgeRepository } from './database/repositories/knowledge.repository.js';
 
 async function main() {
   try {
@@ -128,11 +131,54 @@ async function main() {
     logger.info('Bot is SILENT by default - configure via dashboard');
     logger.info('Scan QR code with WhatsApp to login (if not already authenticated)');
 
+    // === Multi-tenant Pool (for business tenants, separate from default bot) ===
+    const pool = getWhatsAppPool();
+    const tenantRepo = getTenantRepository();
+    const knowledgeRepo = getKnowledgeRepository();
+
+    pool.onMessage(async (tenantId, message) => {
+      try {
+        const jid = message.key.remoteJid;
+        if (!jid) return;
+
+        const tenant = tenantRepo.getById(tenantId);
+        if (!tenant) return;
+
+        // Extract text from message
+        const text = message.message?.conversation
+          || message.message?.extendedTextMessage?.text
+          || message.message?.imageMessage?.caption
+          || '';
+
+        if (!text) return;
+
+        // Build custom prompt from tenant's system prompt + knowledge base
+        const knowledgeText = knowledgeRepo.getFormattedKnowledge(tenantId);
+        const customPrompt = (tenant.system_prompt || '') + knowledgeText;
+
+        const response = await gemini.generateResponse(jid, text, customPrompt || undefined, tenantId);
+
+        if (response.text) {
+          await pool.sendReply(tenantId, jid, response.text, message);
+        }
+      } catch (err) {
+        logger.error(`[${tenantId}] Tenant message handler error:`, err);
+      }
+    });
+
+    // Connect all active business tenants (skips 'default')
+    pool.connectAllActive().then(() => {
+      logger.info('Multi-tenant pool initialized');
+    }).catch((err) => {
+      logger.error('Error initializing tenant pool:', err);
+    });
+
     // Handle graceful shutdown
-    const shutdown = () => {
+    const shutdown = async () => {
       logger.info('Shutting down...');
       scheduler.cancelAll();
       birthdayService.stop();
+      await pool.disconnectAll();
       closeDatabase();
       process.exit(0);
     };
