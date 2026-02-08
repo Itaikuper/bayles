@@ -857,12 +857,12 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
     }
 
     const list = results.map((s, i) =>
-      `${i + 1}. *${s.title}* - ${s.artist}`
-    ).join('\n');
+      `${i + 1}. *${s.title}* - ${s.artist}\n${s.url}`
+    ).join('\n\n');
 
     await this.whatsapp.sendReply(
       jid,
-      `נמצאו ${results.length} שירים:\n\n${list}\n\nכתוב את שם השיר המדויק לקבלת הלינק.`,
+      `🎸 נמצאו ${results.length} שירים:\n\n${list}`,
       originalMessage
     );
   }
