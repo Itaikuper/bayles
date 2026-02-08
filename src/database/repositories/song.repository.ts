@@ -9,11 +9,19 @@ export interface SongRecord {
   tenant_id: string;
 }
 
+// Hebrew stop words to filter out from search queries
+const STOP_WORDS = new Set([
+  'של', 'את', 'על', 'עם', 'אל', 'מה', 'גם', 'כי', 'כל', 'אם', 'או',
+  'לא', 'הוא', 'היא', 'זה', 'זו', 'הם', 'הן', 'אני', 'לי', 'לו', 'לה',
+  'לשיר', 'שיר', 'אקורד', 'אקורדים', 'טאבים', 'גיטרה',
+  'the', 'of', 'and', 'a', 'an', 'in', 'to', 'for', 'by',
+]);
+
 export class SongRepository {
   private db = getDatabase();
 
   search(query: string, limit: number = 10): SongRecord[] {
-    const words = query.trim().split(/\s+/).filter(w => w.length > 0);
+    const words = query.trim().split(/\s+/).filter(w => w.length > 0 && !STOP_WORDS.has(w));
     if (words.length === 0) return [];
 
     // Each word must appear somewhere in title or artist
