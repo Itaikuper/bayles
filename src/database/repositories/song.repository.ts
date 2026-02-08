@@ -13,11 +13,18 @@ export class SongRepository {
   private db = getDatabase();
 
   search(query: string, limit: number = 10): SongRecord[] {
+    const words = query.trim().split(/\s+/).filter(w => w.length > 0);
+    if (words.length === 0) return [];
+
+    // Each word must appear somewhere in title or artist
+    const conditions = words.map(() => `(title || ' ' || artist) LIKE ?`);
+    const params = words.map(w => `%${w}%`);
+
     return this.db
       .prepare(`
         SELECT id, title, artist, url, capo, tenant_id
         FROM songs
-        WHERE title LIKE ? OR artist LIKE ?
+        WHERE ${conditions.join(' AND ')}
         ORDER BY
           CASE
             WHEN title LIKE ? THEN 1
@@ -27,7 +34,7 @@ export class SongRepository {
           title
         LIMIT ?
       `)
-      .all(`%${query}%`, `%${query}%`, `${query}%`, `${query}%`, limit) as SongRecord[];
+      .all(...params, `${query}%`, `${query}%`, limit) as SongRecord[];
   }
 
   getById(id: string): SongRecord | null {
