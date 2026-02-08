@@ -180,13 +180,13 @@ export function runMigrations() {
       INSERT OR IGNORE INTO tenants (id, name, status)
       VALUES ('default', 'Default Bot', 'connected')
     `);
-        // Add tenant_id to existing tables
-        db.exec(`ALTER TABLE chat_configs ADD COLUMN tenant_id TEXT DEFAULT 'default' REFERENCES tenants(id)`);
-        db.exec(`ALTER TABLE knowledge_items ADD COLUMN tenant_id TEXT DEFAULT 'default' REFERENCES tenants(id)`);
-        db.exec(`ALTER TABLE scheduled_messages ADD COLUMN tenant_id TEXT DEFAULT 'default' REFERENCES tenants(id)`);
-        db.exec(`ALTER TABLE messages ADD COLUMN tenant_id TEXT DEFAULT 'default' REFERENCES tenants(id)`);
-        db.exec(`ALTER TABLE activity_log ADD COLUMN tenant_id TEXT DEFAULT 'default' REFERENCES tenants(id)`);
-        db.exec(`ALTER TABLE birthdays ADD COLUMN tenant_id TEXT DEFAULT 'default' REFERENCES tenants(id)`);
+        // Add tenant_id to existing tables (SQLite ALTER TABLE doesn't support REFERENCES)
+        db.exec(`ALTER TABLE chat_configs ADD COLUMN tenant_id TEXT DEFAULT 'default'`);
+        db.exec(`ALTER TABLE knowledge_items ADD COLUMN tenant_id TEXT DEFAULT 'default'`);
+        db.exec(`ALTER TABLE scheduled_messages ADD COLUMN tenant_id TEXT DEFAULT 'default'`);
+        db.exec(`ALTER TABLE messages ADD COLUMN tenant_id TEXT DEFAULT 'default'`);
+        db.exec(`ALTER TABLE activity_log ADD COLUMN tenant_id TEXT DEFAULT 'default'`);
+        db.exec(`ALTER TABLE birthdays ADD COLUMN tenant_id TEXT DEFAULT 'default'`);
         // Create indexes for tenant_id
         db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_configs_tenant ON chat_configs(tenant_id)`);
         db.exec(`CREATE INDEX IF NOT EXISTS idx_knowledge_items_tenant ON knowledge_items(tenant_id)`);
