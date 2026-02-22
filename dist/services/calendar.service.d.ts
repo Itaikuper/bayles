@@ -26,5 +26,6 @@ export declare class CalendarService {
         calendarId: string;
     } | null>;
     formatEventList(events: calendar_v3.Schema$Event[], label?: string): string;
+    private getMeetingLink;
     private formatEventTime;
 }

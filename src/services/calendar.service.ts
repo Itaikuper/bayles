@@ -151,6 +151,10 @@ export class CalendarService {
               const minutesLeft = Math.round(minutesUntilStart);
 
               let msg = `⏰ *תזכורת*: ${summary}\n🕐 בעוד ${minutesLeft} דקות (${timeStr})`;
+              const meetLink = this.getMeetingLink(event);
+              if (meetLink) {
+                msg += `\n🔗 ${meetLink}`;
+              }
               if (event.location) {
                 msg += `\n📍 ${event.location}`;
               }
@@ -182,14 +186,15 @@ export class CalendarService {
     timeMax: Date,
     query?: string
   ): Promise<calendar_v3.Schema$Event[]> {
-    const params: calendar_v3.Params$Resource$Events$List = {
+    const params = {
       calendarId,
       timeMin: timeMin.toISOString(),
       timeMax: timeMax.toISOString(),
       singleEvents: true,
       orderBy: 'startTime',
       timeZone: config.calendarTimezone,
-    };
+      conferenceDataVersion: 1,
+    } as calendar_v3.Params$Resource$Events$List;
     if (query) params.q = query;
 
     const res = await this.calendar.events.list(params);
@@ -316,11 +321,25 @@ export class CalendarService {
     const lines = events.map(event => {
       const summary = event.summary || '(ללא כותרת)';
       const timeStr = this.formatEventTime(event);
-      return `• ${timeStr} ${summary}`;
+      const meetLink = this.getMeetingLink(event);
+      let line = `• ${timeStr} ${summary}`;
+      if (meetLink) line += `\n  🔗 ${meetLink}`;
+      return line;
     });
 
     const header = label ? `📅 אירועים ${label}:\n\n` : '';
     return `${header}${lines.join('\n')}`;
+  }
+
+  private getMeetingLink(event: calendar_v3.Schema$Event): string | null {
+    // Check conferenceData first (Zoom, Teams, Meet, etc.)
+    if (event.conferenceData?.entryPoints) {
+      const videoEntry = event.conferenceData.entryPoints.find(ep => ep.entryPointType === 'video');
+      if (videoEntry?.uri) return videoEntry.uri;
+    }
+    // Fallback to hangoutLink (Google Meet)
+    if (event.hangoutLink) return event.hangoutLink;
+    return null;
   }
 
   private formatEventTime(event: calendar_v3.Schema$Event): string {

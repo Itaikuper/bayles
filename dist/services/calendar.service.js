@@ -134,6 +134,10 @@ export class CalendarService {
                             const timeStr = `${String(eventStart.getHours()).padStart(2, '0')}:${String(eventStart.getMinutes()).padStart(2, '0')}`;
                             const minutesLeft = Math.round(minutesUntilStart);
                             let msg = `⏰ *תזכורת*: ${summary}\n🕐 בעוד ${minutesLeft} דקות (${timeStr})`;
+                            const meetLink = this.getMeetingLink(event);
+                            if (meetLink) {
+                                msg += `\n🔗 ${meetLink}`;
+                            }
                             if (event.location) {
                                 msg += `\n📍 ${event.location}`;
                             }
@@ -165,6 +169,7 @@ export class CalendarService {
             singleEvents: true,
             orderBy: 'startTime',
             timeZone: config.calendarTimezone,
+            conferenceDataVersion: 1,
         };
         if (query)
             params.q = query;
@@ -259,10 +264,26 @@ export class CalendarService {
         const lines = events.map(event => {
             const summary = event.summary || '(ללא כותרת)';
             const timeStr = this.formatEventTime(event);
-            return `• ${timeStr} ${summary}`;
+            const meetLink = this.getMeetingLink(event);
+            let line = `• ${timeStr} ${summary}`;
+            if (meetLink)
+                line += `\n  🔗 ${meetLink}`;
+            return line;
         });
         const header = label ? `📅 אירועים ${label}:\n\n` : '';
         return `${header}${lines.join('\n')}`;
+    }
+    getMeetingLink(event) {
+        // Check conferenceData first (Zoom, Teams, Meet, etc.)
+        if (event.conferenceData?.entryPoints) {
+            const videoEntry = event.conferenceData.entryPoints.find(ep => ep.entryPointType === 'video');
+            if (videoEntry?.uri)
+                return videoEntry.uri;
+        }
+        // Fallback to hangoutLink (Google Meet)
+        if (event.hangoutLink)
+            return event.hangoutLink;
+        return null;
     }
     formatEventTime(event) {
         if (event.start?.date) {
