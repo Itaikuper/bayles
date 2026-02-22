@@ -48,6 +48,7 @@ function Sidebar({ currentPage, setCurrentPage }) {
     { id: 'tenants', label: 'עסקים', icon: '🏢' },
     { id: 'contacts', label: 'ספר טלפונים', icon: '📞' },
     { id: 'songs', label: 'שירים', icon: '🎸' },
+    { id: 'calendar', label: 'יומן', icon: '📆' },
   ];
 
   return (
@@ -2355,6 +2356,338 @@ function Songs() {
   );
 }
 
+function Calendar() {
+  const [links, setLinks] = useState([]);
+  const [chats, setChats] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newLink, setNewLink] = useState({ jid: '', calendar_id: '', display_name: '' });
+  const [editLink, setEditLink] = useState(null);
+
+  // Event preview
+  const [previewJid, setPreviewJid] = useState('');
+  const [previewDate, setPreviewDate] = useState(new Date().toISOString().split('T')[0]);
+  const [events, setEvents] = useState([]);
+  const [loadingEvents, setLoadingEvents] = useState(false);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    try {
+      const [linksData, chatsData] = await Promise.all([
+        api.get('/calendar/links'),
+        api.get('/bot-control/chats'),
+      ]);
+      setLinks(linksData);
+      setChats(chatsData);
+    } catch (err) {
+      console.error('Failed to load calendar data:', err);
+    }
+    setLoading(false);
+  };
+
+  const addLink = async () => {
+    if (!newLink.jid || !newLink.calendar_id) {
+      alert('יש לבחור צ׳אט ולהזין Calendar ID');
+      return;
+    }
+    try {
+      await api.post('/calendar/links', newLink);
+      setNewLink({ jid: '', calendar_id: '', display_name: '' });
+      setShowAddModal(false);
+      loadData();
+    } catch (err) {
+      alert('שגיאה בהוספת קישור - אולי כבר קיים');
+    }
+  };
+
+  const updateLink = async () => {
+    if (!editLink) return;
+    try {
+      await api.put(`/calendar/links/${editLink.id}`, {
+        display_name: editLink.display_name,
+        is_default: editLink.is_default,
+        daily_summary: editLink.daily_summary,
+      });
+      setEditLink(null);
+      loadData();
+    } catch (err) {
+      alert('שגיאה בעדכון');
+    }
+  };
+
+  const deleteLink = async (id) => {
+    if (!confirm('האם להסיר את הקישור ליומן?')) return;
+    try {
+      await api.delete(`/calendar/links/${id}`);
+      loadData();
+    } catch (err) {
+      alert('שגיאה במחיקה');
+    }
+  };
+
+  const loadEvents = async () => {
+    if (!previewJid) return;
+    setLoadingEvents(true);
+    try {
+      const data = await api.get(`/calendar/events?jid=${encodeURIComponent(previewJid)}&date=${previewDate}`);
+      setEvents(data);
+    } catch (err) {
+      console.error('Failed to load events:', err);
+      setEvents([]);
+    }
+    setLoadingEvents(false);
+  };
+
+  const triggerDailySummary = async () => {
+    try {
+      await api.post('/calendar/daily-summary', {});
+      alert('סיכום יומי נשלח!');
+    } catch (err) {
+      alert('שגיאה בשליחת סיכום');
+    }
+  };
+
+  const formatEventTime = (event) => {
+    if (event.start?.date) return 'כל היום';
+    if (event.start?.dateTime) {
+      const start = new Date(event.start.dateTime);
+      const h = String(start.getHours()).padStart(2, '0');
+      const m = String(start.getMinutes()).padStart(2, '0');
+      if (event.end?.dateTime) {
+        const end = new Date(event.end.dateTime);
+        const eh = String(end.getHours()).padStart(2, '0');
+        const em = String(end.getMinutes()).padStart(2, '0');
+        return `${h}:${m} - ${eh}:${em}`;
+      }
+      return h + ':' + m;
+    }
+    return '-';
+  };
+
+  const getChatName = (jid) => {
+    const chat = chats.find(c => c.jid === jid);
+    return chat?.display_name || jid;
+  };
+
+  if (loading) return React.createElement('div', { className: 'loading' }, 'טוען...');
+
+  return React.createElement('div', null,
+    React.createElement('div', { className: 'header' },
+      React.createElement('h2', null, 'יומן Google'),
+      React.createElement('div', { style: { display: 'flex', gap: '8px' } },
+        React.createElement('button', { className: 'btn btn-secondary', onClick: triggerDailySummary }, 'שלח סיכום יומי'),
+        React.createElement('button', { className: 'btn btn-primary', onClick: () => setShowAddModal(true) }, 'קשר יומן חדש')
+      )
+    ),
+
+    // Calendar Links Table
+    React.createElement('div', { className: 'card' },
+      React.createElement('div', { className: 'card-header' },
+        React.createElement('h3', null, `קישורי יומנים (${links.length})`)
+      ),
+      React.createElement('div', { className: 'card-body' },
+        links.length === 0
+          ? React.createElement('div', { className: 'empty-state' }, 'אין יומנים מקושרים. לחץ "קשר יומן חדש" כדי להתחיל.')
+          : React.createElement('table', null,
+              React.createElement('thead', null,
+                React.createElement('tr', null,
+                  React.createElement('th', null, 'צ׳אט'),
+                  React.createElement('th', null, 'Calendar ID'),
+                  React.createElement('th', null, 'שם תצוגה'),
+                  React.createElement('th', null, 'ברירת מחדל'),
+                  React.createElement('th', null, 'סיכום יומי'),
+                  React.createElement('th', null, 'פעולות')
+                )
+              ),
+              React.createElement('tbody', null,
+                links.map(link =>
+                  React.createElement('tr', { key: link.id },
+                    React.createElement('td', null, getChatName(link.jid)),
+                    React.createElement('td', { style: { fontSize: '12px', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis' } }, link.calendar_id),
+                    React.createElement('td', null, link.display_name || '-'),
+                    React.createElement('td', null,
+                      React.createElement('span', { className: `badge ${link.is_default ? 'badge-success' : 'badge-secondary'}` },
+                        link.is_default ? 'כן' : 'לא'
+                      )
+                    ),
+                    React.createElement('td', null,
+                      React.createElement('span', { className: `badge ${link.daily_summary ? 'badge-success' : 'badge-secondary'}` },
+                        link.daily_summary ? 'כן' : 'לא'
+                      )
+                    ),
+                    React.createElement('td', null,
+                      React.createElement('button', {
+                        className: 'btn btn-small btn-primary',
+                        onClick: () => setEditLink({ ...link })
+                      }, 'ערוך'),
+                      React.createElement('button', {
+                        className: 'btn btn-small btn-danger',
+                        onClick: () => deleteLink(link.id)
+                      }, 'הסר')
+                    )
+                  )
+                )
+              )
+            )
+      )
+    ),
+
+    // Event Preview
+    React.createElement('div', { className: 'card' },
+      React.createElement('div', { className: 'card-header' },
+        React.createElement('h3', null, 'תצוגה מקדימה של אירועים')
+      ),
+      React.createElement('div', { className: 'card-body' },
+        React.createElement('div', { style: { display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'flex-end' } },
+          React.createElement('div', { className: 'form-group', style: { margin: 0, flex: 1, minWidth: '150px' } },
+            React.createElement('label', null, 'צ׳אט'),
+            React.createElement('select', {
+              value: previewJid,
+              onChange: e => setPreviewJid(e.target.value)
+            },
+              React.createElement('option', { value: '' }, 'בחר...'),
+              [...new Set(links.map(l => l.jid))].map(jid =>
+                React.createElement('option', { key: jid, value: jid }, getChatName(jid))
+              )
+            )
+          ),
+          React.createElement('div', { className: 'form-group', style: { margin: 0 } },
+            React.createElement('label', null, 'תאריך'),
+            React.createElement('input', {
+              type: 'date',
+              value: previewDate,
+              onChange: e => setPreviewDate(e.target.value)
+            })
+          ),
+          React.createElement('button', {
+            className: 'btn btn-primary',
+            onClick: loadEvents,
+            disabled: !previewJid || loadingEvents
+          }, loadingEvents ? 'טוען...' : 'הצג אירועים')
+        ),
+        events.length > 0
+          ? React.createElement('table', null,
+              React.createElement('thead', null,
+                React.createElement('tr', null,
+                  React.createElement('th', null, 'שעה'),
+                  React.createElement('th', null, 'אירוע'),
+                )
+              ),
+              React.createElement('tbody', null,
+                events.map((ev, i) =>
+                  React.createElement('tr', { key: i },
+                    React.createElement('td', null, formatEventTime(ev)),
+                    React.createElement('td', null, ev.summary || '(ללא כותרת)')
+                  )
+                )
+              )
+            )
+          : previewJid && !loadingEvents
+            ? React.createElement('div', { className: 'empty-state' }, 'אין אירועים בתאריך זה')
+            : null
+      )
+    ),
+
+    // Add Link Modal
+    showAddModal && React.createElement('div', { className: 'modal-overlay', onClick: () => setShowAddModal(false) },
+      React.createElement('div', { className: 'modal', onClick: e => e.stopPropagation() },
+        React.createElement('div', { className: 'modal-header' },
+          React.createElement('h3', null, 'קשר יומן חדש'),
+          React.createElement('button', { className: 'modal-close', onClick: () => setShowAddModal(false) }, '\u00D7')
+        ),
+        React.createElement('div', { className: 'modal-body' },
+          React.createElement('div', { className: 'form-group' },
+            React.createElement('label', null, 'צ׳אט'),
+            React.createElement('select', {
+              value: newLink.jid,
+              onChange: e => setNewLink({ ...newLink, jid: e.target.value })
+            },
+              React.createElement('option', { value: '' }, 'בחר...'),
+              chats.filter(c => c.enabled).map(c =>
+                React.createElement('option', { key: c.jid, value: c.jid },
+                  (c.display_name || c.jid) + (c.is_group ? ' (קבוצה)' : '')
+                )
+              )
+            )
+          ),
+          React.createElement('div', { className: 'form-group' },
+            React.createElement('label', null, 'Calendar ID'),
+            React.createElement('input', {
+              type: 'text',
+              value: newLink.calendar_id,
+              onChange: e => setNewLink({ ...newLink, calendar_id: e.target.value }),
+              placeholder: 'example@gmail.com או abc@group.calendar.google.com'
+            })
+          ),
+          React.createElement('div', { className: 'form-group' },
+            React.createElement('label', null, 'שם תצוגה (אופציונלי)'),
+            React.createElement('input', {
+              type: 'text',
+              value: newLink.display_name,
+              onChange: e => setNewLink({ ...newLink, display_name: e.target.value }),
+              placeholder: 'לדוגמה: היומן המשפחתי'
+            })
+          ),
+          React.createElement('div', { className: 'info-box' },
+            'וודא שהיומן שותף עם ', React.createElement('code', null, 'bayles-calendar@gen-lang-client-0072875231.iam.gserviceaccount.com'), ' בהרשאת "לשנות אירועים".'
+          )
+        ),
+        React.createElement('div', { className: 'modal-footer' },
+          React.createElement('button', { className: 'btn btn-secondary', onClick: () => setShowAddModal(false) }, 'ביטול'),
+          React.createElement('button', { className: 'btn btn-primary', onClick: addLink }, 'קשר יומן')
+        )
+      )
+    ),
+
+    // Edit Link Modal
+    editLink && React.createElement('div', { className: 'modal-overlay', onClick: () => setEditLink(null) },
+      React.createElement('div', { className: 'modal', onClick: e => e.stopPropagation() },
+        React.createElement('div', { className: 'modal-header' },
+          React.createElement('h3', null, 'עריכת קישור יומן'),
+          React.createElement('button', { className: 'modal-close', onClick: () => setEditLink(null) }, '\u00D7')
+        ),
+        React.createElement('div', { className: 'modal-body' },
+          React.createElement('div', { className: 'form-group' },
+            React.createElement('label', null, 'שם תצוגה'),
+            React.createElement('input', {
+              type: 'text',
+              value: editLink.display_name || '',
+              onChange: e => setEditLink({ ...editLink, display_name: e.target.value })
+            })
+          ),
+          React.createElement('div', { className: 'form-group' },
+            React.createElement('label', null,
+              React.createElement('input', {
+                type: 'checkbox',
+                checked: !!editLink.is_default,
+                onChange: e => setEditLink({ ...editLink, is_default: e.target.checked ? 1 : 0 })
+              }),
+              ' יומן ברירת מחדל (אירועים חדשים ייוצרו כאן)'
+            )
+          ),
+          React.createElement('div', { className: 'form-group' },
+            React.createElement('label', null,
+              React.createElement('input', {
+                type: 'checkbox',
+                checked: !!editLink.daily_summary,
+                onChange: e => setEditLink({ ...editLink, daily_summary: e.target.checked ? 1 : 0 })
+              }),
+              ' סיכום יומי (שליחת אירועי היום כל בוקר)'
+            )
+          )
+        ),
+        React.createElement('div', { className: 'modal-footer' },
+          React.createElement('button', { className: 'btn btn-secondary', onClick: () => setEditLink(null) }, 'ביטול'),
+          React.createElement('button', { className: 'btn btn-primary', onClick: updateLink }, 'שמור')
+        )
+      )
+    )
+  );
+}
+
 function App() {
   const [currentPage, setCurrentPage] = useState('dashboard');
 
@@ -2373,6 +2706,7 @@ function App() {
       case 'tenants': return <Tenants />;
       case 'contacts': return <Contacts />;
       case 'songs': return <Songs />;
+      case 'calendar': return React.createElement(Calendar);
       default: return <Dashboard />;
     }
   };
