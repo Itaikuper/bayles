@@ -84,6 +84,115 @@ const searchContactDeclaration: FunctionDeclaration = {
   },
 };
 
+// Calendar function declarations
+const listCalendarEventsDeclaration: FunctionDeclaration = {
+  name: 'list_calendar_events',
+  description: 'List events from the user\'s Google Calendar. Use when user asks about their schedule, events, or calendar. Keywords: מה יש לי, יומן, אירועים, לוח, פגישות, calendar, events, schedule, מה התכנון.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      startDate: {
+        type: Type.STRING,
+        description: 'Start date in YYYY-MM-DD format. Default to today if not specified.',
+      },
+      endDate: {
+        type: Type.STRING,
+        description: 'End date in YYYY-MM-DD format. Default to same as startDate for single day, or end of week/month if range is mentioned.',
+      },
+      query: {
+        type: Type.STRING,
+        description: 'Optional search query to filter events by text.',
+      },
+    },
+    required: ['startDate', 'endDate'],
+  },
+};
+
+const createCalendarEventDeclaration: FunctionDeclaration = {
+  name: 'create_calendar_event',
+  description: 'Create a new event in the user\'s Google Calendar. Use when user wants to add an event, meeting, or appointment. Keywords: תוסיף אירוע, תקבע פגישה, תכניס ליומן, הוסף, add event, create meeting.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      summary: {
+        type: Type.STRING,
+        description: 'Event title/summary. Examples: "פגישה עם דוד", "ארוחת ערב", "שיעור גיטרה"',
+      },
+      date: {
+        type: Type.STRING,
+        description: 'Event date in YYYY-MM-DD format. Calculate from today for relative dates like "מחר", "ביום שלישי".',
+      },
+      startHour: {
+        type: Type.NUMBER,
+        description: 'Start hour in 24h format (0-23).',
+      },
+      startMinute: {
+        type: Type.NUMBER,
+        description: 'Start minute (0-59). Default to 0 if not specified.',
+      },
+      durationMinutes: {
+        type: Type.NUMBER,
+        description: 'Duration in minutes. Default to 60 if not specified.',
+      },
+    },
+    required: ['summary', 'date', 'startHour'],
+  },
+};
+
+const updateCalendarEventDeclaration: FunctionDeclaration = {
+  name: 'update_calendar_event',
+  description: 'Update an existing event in the user\'s Google Calendar. Use when user wants to change, move, or modify an event. Keywords: תשנה, תזיז, תעדכן, עדכן, שנה, הזז, update, change, move.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      searchQuery: {
+        type: Type.STRING,
+        description: 'Text to search for to find the event to update. Example: "פגישה עם דוד"',
+      },
+      searchDate: {
+        type: Type.STRING,
+        description: 'Date to search for the event in YYYY-MM-DD format.',
+      },
+      newSummary: {
+        type: Type.STRING,
+        description: 'New title for the event (if changing title).',
+      },
+      newDate: {
+        type: Type.STRING,
+        description: 'New date in YYYY-MM-DD format (if moving to different date).',
+      },
+      newStartHour: {
+        type: Type.NUMBER,
+        description: 'New start hour in 24h format (if changing time).',
+      },
+      newStartMinute: {
+        type: Type.NUMBER,
+        description: 'New start minute (if changing time).',
+      },
+    },
+    required: ['searchQuery', 'searchDate'],
+  },
+};
+
+const deleteCalendarEventDeclaration: FunctionDeclaration = {
+  name: 'delete_calendar_event',
+  description: 'Delete an event from the user\'s Google Calendar. Use when user wants to cancel or remove an event. Keywords: תמחק אירוע, תבטל, בטל פגישה, delete event, cancel, remove.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      searchQuery: {
+        type: Type.STRING,
+        description: 'Text to search for to find the event to delete. Example: "פגישה עם דוד"',
+      },
+      searchDate: {
+        type: Type.STRING,
+        description: 'Date to search for the event in YYYY-MM-DD format.',
+      },
+    },
+    required: ['searchQuery', 'searchDate'],
+  },
+};
+
 export class GeminiService {
   private ai: GoogleGenAI;
   private conversationHistory: Map<string, ChatHistory[]> = new Map();
@@ -152,15 +261,25 @@ export class GeminiService {
       const schedulingKeywords = /תזמן|תזכיר|תשלח בשעה|כל יום|מחר בשעה|schedule|remind|תקבע|הזכר לי|בשעה \d/i;
       const songKeywords = /שיר|אקורד|טאב|גיטרה|chord|song|tab|לנגן|תנגן|אקורד/i;
       const contactKeywords = /טלפון|פלאפון|מספר של|איש קשר|phone|contact|number/i;
+      const calendarKeywords = /מה יש לי|יומן|אירוע|פגישה|לוח|תוסיף אירוע|תקבע פגישה|תכניס ליומן|תמחק אירוע|תבטל פגישה|תשנה אירוע|תזיז|תעדכן אירוע|calendar|events|meeting/i;
       const isSchedulingRequest = schedulingKeywords.test(userMessage);
       const isSongRequest = songKeywords.test(userMessage);
       const isContactRequest = contactKeywords.test(userMessage);
-      const isFunctionCallRequest = isSchedulingRequest || isSongRequest || isContactRequest;
+      const isCalendarRequest = calendarKeywords.test(userMessage);
+      const isFunctionCallRequest = isSchedulingRequest || isSongRequest || isContactRequest || isCalendarRequest;
 
       const functionDeclarations: FunctionDeclaration[] = [];
       if (isSchedulingRequest) functionDeclarations.push(createScheduleDeclaration);
       if (isSongRequest) functionDeclarations.push(searchSongDeclaration);
       if (isContactRequest) functionDeclarations.push(searchContactDeclaration);
+      if (isCalendarRequest) {
+        functionDeclarations.push(
+          listCalendarEventsDeclaration,
+          createCalendarEventDeclaration,
+          updateCalendarEventDeclaration,
+          deleteCalendarEventDeclaration
+        );
+      }
 
       const tools = isFunctionCallRequest
         ? [{ functionDeclarations }]

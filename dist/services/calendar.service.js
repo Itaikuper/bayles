@@ -1,141 +1,203 @@
 import { google } from 'googleapis';
+import { readFileSync } from 'fs';
+import cron from 'node-cron';
 import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
+import { getCalendarLinkRepository } from '../database/repositories/calendar-link.repository.js';
 export class CalendarService {
+    whatsapp;
     calendar;
-    calendarId;
-    constructor() {
+    cronTask = null;
+    constructor(whatsapp) {
+        this.whatsapp = whatsapp;
+        // Initialize Google Calendar API with service account
+        const keyFile = JSON.parse(readFileSync(config.googleServiceAccountPath, 'utf-8'));
         const auth = new google.auth.GoogleAuth({
-            keyFile: config.googleServiceAccountKeyFile,
+            credentials: keyFile,
             scopes: ['https://www.googleapis.com/auth/calendar'],
         });
         this.calendar = google.calendar({ version: 'v3', auth });
-        this.calendarId = config.googleCalendarId;
+        logger.info('CalendarService initialized with service account');
     }
-    async createEvent(params) {
-        try {
-            const event = {
-                summary: params.summary,
-                location: params.location,
-                description: params.description,
-                start: {
-                    dateTime: params.start_datetime,
-                    timeZone: config.calendarTimeZone,
-                },
-                end: {
-                    dateTime: params.end_datetime,
-                    timeZone: config.calendarTimeZone,
-                },
-            };
-            const res = await this.calendar.events.insert({
-                calendarId: this.calendarId,
-                requestBody: event,
-            });
-            logger.info(`Calendar event created: ${res.data.id}`);
-            return {
-                success: true,
-                event_id: res.data.id,
-                summary: res.data.summary,
-                start: res.data.start?.dateTime,
-                end: res.data.end?.dateTime,
-                link: res.data.htmlLink,
-            };
-        }
-        catch (error) {
-            logger.error('Calendar create event error:', error);
-            return { success: false, error: String(error) };
+    // --- Cron for daily summaries ---
+    start() {
+        this.cronTask = cron.schedule(config.calendarDailySummaryCron, () => {
+            this.sendDailySummaries().catch(err => logger.error('Daily calendar summary error:', err));
+        }, { timezone: config.calendarTimezone });
+        logger.info(`Calendar daily summary cron started: ${config.calendarDailySummaryCron}`);
+    }
+    stop() {
+        if (this.cronTask) {
+            this.cronTask.stop();
+            this.cronTask = null;
+            logger.info('Calendar daily summary cron stopped');
         }
     }
-    async listEvents(params) {
-        try {
-            const now = new Date().toISOString();
-            const weekFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-            const res = await this.calendar.events.list({
-                calendarId: this.calendarId,
-                timeMin: params.time_min || now,
-                timeMax: params.time_max || weekFromNow,
-                maxResults: params.max_results || 10,
-                singleEvents: true,
-                orderBy: 'startTime',
-            });
-            const events = (res.data.items || []).map((e) => ({
-                event_id: e.id,
-                summary: e.summary,
-                start: e.start?.dateTime || e.start?.date,
-                end: e.end?.dateTime || e.end?.date,
-                location: e.location,
-                description: e.description,
-            }));
-            logger.info(`Calendar listed ${events.length} events`);
-            return { success: true, events, count: events.length };
+    async sendDailySummaries() {
+        const repo = getCalendarLinkRepository();
+        const links = repo.findDailySummaryLinks();
+        if (links.length === 0)
+            return;
+        const today = new Date();
+        const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
+        // Group links by JID so we send one summary per user
+        const byJid = new Map();
+        for (const link of links) {
+            const calIds = byJid.get(link.jid) || [];
+            calIds.push(link.calendar_id);
+            byJid.set(link.jid, calIds);
         }
-        catch (error) {
-            logger.error('Calendar list events error:', error);
-            return { success: false, error: String(error) };
-        }
-    }
-    async updateEvent(params) {
-        try {
-            const existing = await this.calendar.events.get({
-                calendarId: this.calendarId,
-                eventId: params.event_id,
-            });
-            const updatedEvent = {
-                summary: params.summary || existing.data.summary,
-                location: params.location !== undefined ? params.location : existing.data.location,
-                description: params.description !== undefined ? params.description : existing.data.description,
-                start: params.start_datetime
-                    ? { dateTime: params.start_datetime, timeZone: config.calendarTimeZone }
-                    : existing.data.start,
-                end: params.end_datetime
-                    ? { dateTime: params.end_datetime, timeZone: config.calendarTimeZone }
-                    : existing.data.end,
-            };
-            const res = await this.calendar.events.update({
-                calendarId: this.calendarId,
-                eventId: params.event_id,
-                requestBody: updatedEvent,
-            });
-            logger.info(`Calendar event updated: ${params.event_id}`);
-            return {
-                success: true,
-                event_id: res.data.id,
-                summary: res.data.summary,
-                start: res.data.start?.dateTime,
-                end: res.data.end?.dateTime,
-            };
-        }
-        catch (error) {
-            logger.error('Calendar update event error:', error);
-            return { success: false, error: String(error) };
+        for (const [jid, calendarIds] of byJid) {
+            try {
+                const allEvents = [];
+                for (const calId of calendarIds) {
+                    const events = await this.listEvents(calId, startOfDay, endOfDay);
+                    allEvents.push(...events);
+                }
+                if (allEvents.length === 0) {
+                    await this.whatsapp.sendTextMessage(jid, '📅 *סיכום יומי*\n\nאין אירועים היום. יום פנוי! 🎉');
+                }
+                else {
+                    allEvents.sort((a, b) => {
+                        const aTime = a.start?.dateTime || a.start?.date || '';
+                        const bTime = b.start?.dateTime || b.start?.date || '';
+                        return aTime.localeCompare(bTime);
+                    });
+                    const formatted = this.formatEventList(allEvents, 'היום');
+                    await this.whatsapp.sendTextMessage(jid, `📅 *סיכום יומי*\n\n${formatted}`);
+                }
+            }
+            catch (err) {
+                logger.error(`Failed to send daily summary to ${jid}:`, err);
+            }
         }
     }
-    async deleteEvent(params) {
-        try {
-            await this.calendar.events.delete({
-                calendarId: this.calendarId,
-                eventId: params.event_id,
-            });
-            logger.info(`Calendar event deleted: ${params.event_id}`);
-            return { success: true, event_id: params.event_id };
-        }
-        catch (error) {
-            logger.error('Calendar delete event error:', error);
-            return { success: false, error: String(error) };
-        }
+    // --- Core Calendar API methods ---
+    async listEvents(calendarId, timeMin, timeMax, query) {
+        const params = {
+            calendarId,
+            timeMin: timeMin.toISOString(),
+            timeMax: timeMax.toISOString(),
+            singleEvents: true,
+            orderBy: 'startTime',
+            timeZone: config.calendarTimezone,
+        };
+        if (query)
+            params.q = query;
+        const res = await this.calendar.events.list(params);
+        return res.data.items || [];
     }
-    async executeFunction(name, args) {
-        switch (name) {
-            case 'calendar_create_event':
-                return this.createEvent(args);
-            case 'calendar_list_events':
-                return this.listEvents(args);
-            case 'calendar_update_event':
-                return this.updateEvent(args);
-            case 'calendar_delete_event':
-                return this.deleteEvent(args);
-            default:
-                return { success: false, error: `Unknown function: ${name}` };
+    async createEvent(calendarId, summary, startTime, endTime) {
+        const res = await this.calendar.events.insert({
+            calendarId,
+            requestBody: {
+                summary,
+                start: { dateTime: startTime.toISOString(), timeZone: config.calendarTimezone },
+                end: { dateTime: endTime.toISOString(), timeZone: config.calendarTimezone },
+            },
+        });
+        return res.data;
+    }
+    async updateEvent(calendarId, eventId, updates) {
+        const body = {};
+        if (updates.summary)
+            body.summary = updates.summary;
+        if (updates.start)
+            body.start = { dateTime: updates.start.toISOString(), timeZone: config.calendarTimezone };
+        if (updates.end)
+            body.end = { dateTime: updates.end.toISOString(), timeZone: config.calendarTimezone };
+        const res = await this.calendar.events.patch({
+            calendarId,
+            eventId,
+            requestBody: body,
+        });
+        return res.data;
+    }
+    async deleteEvent(calendarId, eventId) {
+        await this.calendar.events.delete({ calendarId, eventId });
+    }
+    // --- JID-aware wrappers ---
+    async listEventsForJid(jid, startDate, endDate, query) {
+        const repo = getCalendarLinkRepository();
+        const links = repo.findByJid(jid);
+        if (links.length === 0)
+            return [];
+        const allEvents = [];
+        for (const link of links) {
+            try {
+                const events = await this.listEvents(link.calendar_id, startDate, endDate, query);
+                allEvents.push(...events);
+            }
+            catch (err) {
+                logger.error(`Failed to list events from calendar ${link.calendar_id}:`, err);
+            }
         }
+        allEvents.sort((a, b) => {
+            const aTime = a.start?.dateTime || a.start?.date || '';
+            const bTime = b.start?.dateTime || b.start?.date || '';
+            return aTime.localeCompare(bTime);
+        });
+        return allEvents;
+    }
+    async createEventForJid(jid, summary, startTime, endTime) {
+        const repo = getCalendarLinkRepository();
+        const defaultLink = repo.findDefaultByJid(jid);
+        if (!defaultLink)
+            return null;
+        return this.createEvent(defaultLink.calendar_id, summary, startTime, endTime);
+    }
+    async searchEventForJid(jid, query, searchDate) {
+        const repo = getCalendarLinkRepository();
+        const links = repo.findByJid(jid);
+        if (links.length === 0)
+            return null;
+        // Search in a window around the given date (same day)
+        const startOfDay = new Date(searchDate.getFullYear(), searchDate.getMonth(), searchDate.getDate());
+        const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
+        for (const link of links) {
+            try {
+                const events = await this.listEvents(link.calendar_id, startOfDay, endOfDay, query);
+                if (events.length > 0) {
+                    return { event: events[0], calendarId: link.calendar_id };
+                }
+            }
+            catch (err) {
+                logger.error(`Failed to search events in calendar ${link.calendar_id}:`, err);
+            }
+        }
+        return null;
+    }
+    // --- Formatting ---
+    formatEventList(events, label) {
+        if (events.length === 0) {
+            return label ? `אין אירועים ${label}` : 'אין אירועים';
+        }
+        const lines = events.map(event => {
+            const summary = event.summary || '(ללא כותרת)';
+            const timeStr = this.formatEventTime(event);
+            return `• ${timeStr} ${summary}`;
+        });
+        const header = label ? `📅 אירועים ${label}:\n\n` : '';
+        return `${header}${lines.join('\n')}`;
+    }
+    formatEventTime(event) {
+        if (event.start?.date) {
+            // All-day event
+            return '🌅 כל היום -';
+        }
+        if (event.start?.dateTime) {
+            const start = new Date(event.start.dateTime);
+            const hours = String(start.getHours()).padStart(2, '0');
+            const minutes = String(start.getMinutes()).padStart(2, '0');
+            if (event.end?.dateTime) {
+                const end = new Date(event.end.dateTime);
+                const endHours = String(end.getHours()).padStart(2, '0');
+                const endMinutes = String(end.getMinutes()).padStart(2, '0');
+                return `🕐 ${hours}:${minutes}-${endHours}:${endMinutes}`;
+            }
+            return `🕐 ${hours}:${minutes}`;
+        }
+        return '🕐';
     }
 }

@@ -4,6 +4,7 @@ import { GeminiService } from '../../services/gemini.service.js';
 import { SchedulerService } from '../../services/scheduler.service.js';
 import { BotControlService } from '../../services/bot-control.service.js';
 import { BirthdayService } from '../../services/birthday.service.js';
+import { CalendarService } from '../../services/calendar.service.js';
 import { createGroupsRoutes } from './groups.routes.js';
 import { createSchedulerRoutes } from './scheduler.routes.js';
 import { createMessagesRoutes } from './messages.routes.js';
@@ -15,13 +16,15 @@ import { createKnowledgeRoutes } from './knowledge.routes.js';
 import { createTenantsRoutes } from './tenants.routes.js';
 import { createContactsRoutes } from './contacts.routes.js';
 import { createSongsRoutes } from './songs.routes.js';
+import { createCalendarRoutes } from './calendar.routes.js';
 
 export function createRoutes(
   whatsapp: WhatsAppService,
   gemini: GeminiService,
   scheduler: SchedulerService,
   botControl: BotControlService,
-  birthdayService: BirthdayService
+  birthdayService: BirthdayService,
+  calendarService?: CalendarService
 ): Router {
   const router = Router();
 
@@ -36,6 +39,9 @@ export function createRoutes(
   router.use('/tenants', createTenantsRoutes());
   router.use('/contacts', createContactsRoutes());
   router.use('/songs', createSongsRoutes());
+  if (calendarService) {
+    router.use('/calendar', createCalendarRoutes(calendarService));
+  }
 
   return router;
 }

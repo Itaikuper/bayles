@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { createRoutes } from './routes/index.js';
 import { logger } from '../utils/logger.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export function createApiServer(whatsapp, gemini, scheduler, botControl, birthdayService) {
+export function createApiServer(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService) {
     const app = express();
     // Middleware
     app.use(express.json());
@@ -21,7 +21,7 @@ export function createApiServer(whatsapp, gemini, scheduler, botControl, birthda
     // Serve static files (React dashboard)
     app.use(express.static(path.join(__dirname, '../../web')));
     // API routes - inject services
-    app.use('/api', createRoutes(whatsapp, gemini, scheduler, botControl, birthdayService));
+    app.use('/api', createRoutes(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService));
     // SPA fallback - serve index.html for non-API routes
     app.use((req, res, next) => {
         if (req.method === 'GET' && !req.path.startsWith('/api')) {

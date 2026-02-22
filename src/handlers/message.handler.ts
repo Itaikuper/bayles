@@ -4,12 +4,14 @@ import { GeminiService } from '../services/gemini.service.js';
 import { SchedulerService } from '../services/scheduler.service.js';
 import { BotControlService } from '../services/bot-control.service.js';
 import { BirthdayService } from '../services/birthday.service.js';
+import { CalendarService } from '../services/calendar.service.js';
 import { ScheduleRepository } from '../database/repositories/schedule.repository.js';
 import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
-import type { ScheduleArgs } from '../types/index.js';
+import type { ScheduleArgs, CalendarListArgs, CalendarCreateArgs, CalendarUpdateArgs, CalendarDeleteArgs } from '../types/index.js';
 import { getSongRepository } from '../database/repositories/song.repository.js';
 import { getContactRepository } from '../database/repositories/contact.repository.js';
+import { getCalendarLinkRepository } from '../database/repositories/calendar-link.repository.js';
 
 export class MessageHandler {
   private voiceModeJids: Set<string> = new Set();
@@ -19,7 +21,8 @@ export class MessageHandler {
     private gemini: GeminiService,
     private scheduler: SchedulerService,
     private botControl: BotControlService,
-    private birthdayService: BirthdayService
+    private birthdayService: BirthdayService,
+    private calendarService?: CalendarService
   ) {}
 
   async handle(message: proto.IWebMessageInfo): Promise<void> {
@@ -198,6 +201,22 @@ export class MessageHandler {
         if (response.functionCall.name === 'search_contact') {
           const args = response.functionCall.args as { query: string };
           await this.handleContactSearch(jid, args.query, message);
+          return;
+        }
+        if (response.functionCall.name === 'list_calendar_events') {
+          await this.handleCalendarList(jid, response.functionCall.args as unknown as CalendarListArgs, message);
+          return;
+        }
+        if (response.functionCall.name === 'create_calendar_event') {
+          await this.handleCalendarCreate(jid, response.functionCall.args as unknown as CalendarCreateArgs, message);
+          return;
+        }
+        if (response.functionCall.name === 'update_calendar_event') {
+          await this.handleCalendarUpdate(jid, response.functionCall.args as unknown as CalendarUpdateArgs, message);
+          return;
+        }
+        if (response.functionCall.name === 'delete_calendar_event') {
+          await this.handleCalendarDelete(jid, response.functionCall.args as unknown as CalendarDeleteArgs, message);
           return;
         }
         // Unknown function call - log and ignore
@@ -1149,6 +1168,204 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
       `פקודה לא מוכרת: ${subCommand}\nכתוב /birthdays לעזרה`,
       originalMessage
     );
+  }
+
+  // --- Calendar handlers ---
+
+  private async handleCalendarList(
+    jid: string,
+    args: CalendarListArgs,
+    originalMessage: proto.IWebMessageInfo
+  ): Promise<void> {
+    if (!this.calendarService) {
+      await this.whatsapp.sendReply(jid, '❌ שירות היומן לא מוגדר.', originalMessage);
+      return;
+    }
+
+    const repo = getCalendarLinkRepository();
+    const links = repo.findByJid(jid);
+    if (links.length === 0) {
+      await this.whatsapp.sendReply(jid, '❌ אין לך יומן מקושר. בקש מהמנהל לקשר את היומן שלך.', originalMessage);
+      return;
+    }
+
+    try {
+      const startDate = args.startDate ? new Date(args.startDate) : new Date();
+      const endDate = args.endDate ? new Date(args.endDate) : new Date(startDate);
+
+      const startOfDay = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+      const endOfDay = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate() + 1);
+
+      const events = await this.calendarService.listEventsForJid(jid, startOfDay, endOfDay, args.query);
+
+      // Build date label
+      const isSameDay = startDate.toDateString() === endDate.toDateString();
+      const today = new Date();
+      let label: string;
+      if (isSameDay && startDate.toDateString() === today.toDateString()) {
+        label = 'היום';
+      } else if (isSameDay) {
+        label = `ב-${args.startDate}`;
+      } else {
+        label = `מ-${args.startDate} עד ${args.endDate}`;
+      }
+
+      const formatted = this.calendarService.formatEventList(events, label);
+      await this.whatsapp.sendReply(jid, formatted, originalMessage);
+    } catch (error) {
+      logger.error('Calendar list error:', error);
+      await this.whatsapp.sendReply(jid, '❌ שגיאה בשליפת אירועים מהיומן.', originalMessage);
+    }
+  }
+
+  private async handleCalendarCreate(
+    jid: string,
+    args: CalendarCreateArgs,
+    originalMessage: proto.IWebMessageInfo
+  ): Promise<void> {
+    if (!this.calendarService) {
+      await this.whatsapp.sendReply(jid, '❌ שירות היומן לא מוגדר.', originalMessage);
+      return;
+    }
+
+    const repo = getCalendarLinkRepository();
+    const defaultLink = repo.findDefaultByJid(jid);
+    if (!defaultLink) {
+      await this.whatsapp.sendReply(jid, '❌ אין לך יומן מקושר. בקש מהמנהל לקשר את היומן שלך.', originalMessage);
+      return;
+    }
+
+    try {
+      const hour = Math.floor(args.startHour);
+      const minute = args.startMinute ?? 0;
+      const duration = args.durationMinutes ?? 60;
+
+      const startTime = new Date(`${args.date}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`);
+      const endTime = new Date(startTime.getTime() + duration * 60 * 1000);
+
+      const event = await this.calendarService.createEventForJid(jid, args.summary, startTime, endTime);
+      if (!event) {
+        await this.whatsapp.sendReply(jid, '❌ לא הצלחתי ליצור את האירוע.', originalMessage);
+        return;
+      }
+
+      const timeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+      await this.whatsapp.sendReply(
+        jid,
+        `✅ *אירוע נוצר!*\n\n📌 ${args.summary}\n📅 ${args.date}\n🕐 ${timeStr} (${duration} דקות)`,
+        originalMessage
+      );
+    } catch (error) {
+      logger.error('Calendar create error:', error);
+      await this.whatsapp.sendReply(jid, '❌ שגיאה ביצירת אירוע ביומן.', originalMessage);
+    }
+  }
+
+  private async handleCalendarUpdate(
+    jid: string,
+    args: CalendarUpdateArgs,
+    originalMessage: proto.IWebMessageInfo
+  ): Promise<void> {
+    if (!this.calendarService) {
+      await this.whatsapp.sendReply(jid, '❌ שירות היומן לא מוגדר.', originalMessage);
+      return;
+    }
+
+    const repo = getCalendarLinkRepository();
+    const links = repo.findByJid(jid);
+    if (links.length === 0) {
+      await this.whatsapp.sendReply(jid, '❌ אין לך יומן מקושר.', originalMessage);
+      return;
+    }
+
+    try {
+      const searchDate = new Date(args.searchDate);
+      const found = await this.calendarService.searchEventForJid(jid, args.searchQuery, searchDate);
+
+      if (!found) {
+        await this.whatsapp.sendReply(jid, `❌ לא מצאתי אירוע "${args.searchQuery}" בתאריך ${args.searchDate}.`, originalMessage);
+        return;
+      }
+
+      const updates: { summary?: string; start?: Date; end?: Date } = {};
+      if (args.newSummary) updates.summary = args.newSummary;
+
+      if (args.newDate || args.newStartHour !== undefined) {
+        // Calculate new start time
+        const existingStart = found.event.start?.dateTime
+          ? new Date(found.event.start.dateTime)
+          : new Date(args.searchDate);
+        const existingEnd = found.event.end?.dateTime
+          ? new Date(found.event.end.dateTime)
+          : new Date(existingStart.getTime() + 60 * 60 * 1000);
+        const duration = existingEnd.getTime() - existingStart.getTime();
+
+        const newDate = args.newDate || args.searchDate;
+        const newHour = args.newStartHour ?? existingStart.getHours();
+        const newMinute = args.newStartMinute ?? existingStart.getMinutes();
+
+        const newStart = new Date(`${newDate}T${String(newHour).padStart(2, '0')}:${String(newMinute).padStart(2, '0')}:00`);
+        updates.start = newStart;
+        updates.end = new Date(newStart.getTime() + duration);
+      }
+
+      await this.calendarService.updateEvent(found.calendarId, found.event.id!, updates);
+
+      const changes: string[] = [];
+      if (args.newSummary) changes.push(`📌 כותרת: ${args.newSummary}`);
+      if (args.newDate) changes.push(`📅 תאריך: ${args.newDate}`);
+      if (args.newStartHour !== undefined) {
+        const m = args.newStartMinute ?? 0;
+        changes.push(`🕐 שעה: ${String(args.newStartHour).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+      }
+
+      await this.whatsapp.sendReply(
+        jid,
+        `✅ *אירוע עודכן!*\n\nאירוע: "${found.event.summary}"\n${changes.join('\n')}`,
+        originalMessage
+      );
+    } catch (error) {
+      logger.error('Calendar update error:', error);
+      await this.whatsapp.sendReply(jid, '❌ שגיאה בעדכון האירוע.', originalMessage);
+    }
+  }
+
+  private async handleCalendarDelete(
+    jid: string,
+    args: CalendarDeleteArgs,
+    originalMessage: proto.IWebMessageInfo
+  ): Promise<void> {
+    if (!this.calendarService) {
+      await this.whatsapp.sendReply(jid, '❌ שירות היומן לא מוגדר.', originalMessage);
+      return;
+    }
+
+    const repo = getCalendarLinkRepository();
+    const links = repo.findByJid(jid);
+    if (links.length === 0) {
+      await this.whatsapp.sendReply(jid, '❌ אין לך יומן מקושר.', originalMessage);
+      return;
+    }
+
+    try {
+      const searchDate = new Date(args.searchDate);
+      const found = await this.calendarService.searchEventForJid(jid, args.searchQuery, searchDate);
+
+      if (!found) {
+        await this.whatsapp.sendReply(jid, `❌ לא מצאתי אירוע "${args.searchQuery}" בתאריך ${args.searchDate}.`, originalMessage);
+        return;
+      }
+
+      await this.calendarService.deleteEvent(found.calendarId, found.event.id!);
+      await this.whatsapp.sendReply(
+        jid,
+        `🗑️ *אירוע נמחק!*\n\n"${found.event.summary}" בתאריך ${args.searchDate}`,
+        originalMessage
+      );
+    } catch (error) {
+      logger.error('Calendar delete error:', error);
+      await this.whatsapp.sendReply(jid, '❌ שגיאה במחיקת האירוע.', originalMessage);
+    }
   }
 
   private extractImagePrompt(text: string): { prompt: string; pro: boolean } | null {

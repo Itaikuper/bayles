@@ -286,4 +286,26 @@ export function runMigrations() {
         db.prepare('INSERT INTO migrations (name) VALUES (?)').run('009_conversation_history');
         logger.info('Migration 009_conversation_history completed');
     }
+    // Migration 010: Calendar links (Google Calendar integration)
+    const applied010 = db.prepare('SELECT name FROM migrations WHERE name = ?').get('010_calendar_links');
+    if (!applied010) {
+        logger.info('Running migration: 010_calendar_links');
+        db.exec(`
+      CREATE TABLE IF NOT EXISTS calendar_links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        jid TEXT NOT NULL,
+        calendar_id TEXT NOT NULL,
+        display_name TEXT,
+        is_default INTEGER DEFAULT 1,
+        daily_summary INTEGER DEFAULT 0,
+        tenant_id TEXT DEFAULT 'default',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(jid, calendar_id)
+      )
+    `);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_calendar_links_jid ON calendar_links(jid)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_calendar_links_tenant ON calendar_links(tenant_id)`);
+        db.prepare('INSERT INTO migrations (name) VALUES (?)').run('010_calendar_links');
+        logger.info('Migration 010_calendar_links completed');
+    }
 }

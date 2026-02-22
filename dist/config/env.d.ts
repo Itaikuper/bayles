@@ -6,5 +6,8 @@ export declare const config: {
     familyGroupName: string;
     systemPrompt: string;
     autoImageGeneration: boolean;
+    googleServiceAccountPath: string;
+    calendarDailySummaryCron: string;
+    calendarTimezone: string;
 };
 export declare function validateConfig(): void;

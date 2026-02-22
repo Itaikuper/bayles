@@ -15,6 +15,10 @@ export const config = {
         'You are a helpful WhatsApp assistant. Keep responses concise and conversational. Respond in the same language as the user.',
     // Auto image generation in learning conversations
     autoImageGeneration: process.env.AUTO_IMAGE_GENERATION !== 'false',
+    // Google Calendar
+    googleServiceAccountPath: process.env.GOOGLE_SERVICE_ACCOUNT_PATH || './service-account.json',
+    calendarDailySummaryCron: process.env.CALENDAR_DAILY_SUMMARY_CRON || '0 7 * * *',
+    calendarTimezone: process.env.CALENDAR_TIMEZONE || 'Asia/Jerusalem',
 };
 export function validateConfig() {
     if (!config.geminiApiKey) {

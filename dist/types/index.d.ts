@@ -46,3 +46,27 @@ export interface GeminiResponse {
         args: Record<string, unknown>;
     };
 }
+export interface CalendarListArgs {
+    startDate?: string;
+    endDate?: string;
+    query?: string;
+}
+export interface CalendarCreateArgs {
+    summary: string;
+    date: string;
+    startHour: number;
+    startMinute?: number;
+    durationMinutes?: number;
+}
+export interface CalendarUpdateArgs {
+    searchQuery: string;
+    searchDate: string;
+    newSummary?: string;
+    newDate?: string;
+    newStartHour?: number;
+    newStartMinute?: number;
+}
+export interface CalendarDeleteArgs {
+    searchQuery: string;
+    searchDate: string;
+}

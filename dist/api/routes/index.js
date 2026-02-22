@@ -10,7 +10,8 @@ import { createKnowledgeRoutes } from './knowledge.routes.js';
 import { createTenantsRoutes } from './tenants.routes.js';
 import { createContactsRoutes } from './contacts.routes.js';
 import { createSongsRoutes } from './songs.routes.js';
-export function createRoutes(whatsapp, gemini, scheduler, botControl, birthdayService) {
+import { createCalendarRoutes } from './calendar.routes.js';
+export function createRoutes(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService) {
     const router = Router();
     router.use('/groups', createGroupsRoutes(whatsapp));
     router.use('/scheduler', createSchedulerRoutes(scheduler));
@@ -23,5 +24,8 @@ export function createRoutes(whatsapp, gemini, scheduler, botControl, birthdaySe
     router.use('/tenants', createTenantsRoutes());
     router.use('/contacts', createContactsRoutes());
     router.use('/songs', createSongsRoutes());
+    if (calendarService) {
+        router.use('/calendar', createCalendarRoutes(calendarService));
+    }
     return router;
 }

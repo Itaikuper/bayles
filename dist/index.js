@@ -1,8 +1,10 @@
+import { existsSync } from 'fs';
 import { WhatsAppService } from './services/whatsapp.service.js';
 import { GeminiService } from './services/gemini.service.js';
 import { SchedulerService } from './services/scheduler.service.js';
 import { BirthdayService } from './services/birthday.service.js';
 import { CompactionService } from './services/compaction.service.js';
+import { CalendarService } from './services/calendar.service.js';
 import { getBotControlService } from './services/bot-control.service.js';
 import { MessageHandler } from './handlers/message.handler.js';
 import { validateConfig, config } from './config/env.js';
@@ -46,8 +48,23 @@ async function main() {
         compactionService.start();
         // Initialize bot control service
         const botControl = getBotControlService();
+        // Initialize calendar service (optional - only if service account exists)
+        let calendarService;
+        if (existsSync(config.googleServiceAccountPath)) {
+            try {
+                calendarService = new CalendarService(whatsapp);
+                calendarService.start();
+                logger.info('CalendarService started');
+            }
+            catch (err) {
+                logger.warn('CalendarService failed to initialize (calendar features disabled):', err);
+            }
+        }
+        else {
+            logger.info('No service account found, calendar features disabled');
+        }
         // Initialize message handler
-        const messageHandler = new MessageHandler(whatsapp, gemini, scheduler, botControl, birthdayService);
+        const messageHandler = new MessageHandler(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService);
         // Auto-whitelist family group members (group + private DMs)
         let familyGroupJid = null;
         const syncFamilyGroup = async () => {
@@ -111,7 +128,7 @@ async function main() {
         });
         // Start API server (dashboard)
         const apiPort = parseInt(process.env.API_PORT || '3000');
-        const app = createApiServer(whatsapp, gemini, scheduler, botControl, birthdayService);
+        const app = createApiServer(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService);
         startApiServer(app, apiPort);
         logger.info('Bot is running!');
         logger.info(`Bot prefix: ${config.botPrefix}`);
@@ -160,6 +177,7 @@ async function main() {
             scheduler.cancelAll();
             birthdayService.stop();
             compactionService.stop();
+            calendarService?.stop();
             await pool.disconnectAll();
             closeDatabase();
             process.exit(0);

@@ -3,19 +3,22 @@ import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { getSongRepository } from '../database/repositories/song.repository.js';
 import { getContactRepository } from '../database/repositories/contact.repository.js';
+import { getCalendarLinkRepository } from '../database/repositories/calendar-link.repository.js';
 export class MessageHandler {
     whatsapp;
     gemini;
     scheduler;
     botControl;
     birthdayService;
+    calendarService;
     voiceModeJids = new Set();
-    constructor(whatsapp, gemini, scheduler, botControl, birthdayService) {
+    constructor(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService) {
         this.whatsapp = whatsapp;
         this.gemini = gemini;
         this.scheduler = scheduler;
         this.botControl = botControl;
         this.birthdayService = birthdayService;
+        this.calendarService = calendarService;
     }
     async handle(message) {
         const jid = message.key.remoteJid;
@@ -155,6 +158,22 @@ export class MessageHandler {
                 if (response.functionCall.name === 'search_contact') {
                     const args = response.functionCall.args;
                     await this.handleContactSearch(jid, args.query, message);
+                    return;
+                }
+                if (response.functionCall.name === 'list_calendar_events') {
+                    await this.handleCalendarList(jid, response.functionCall.args, message);
+                    return;
+                }
+                if (response.functionCall.name === 'create_calendar_event') {
+                    await this.handleCalendarCreate(jid, response.functionCall.args, message);
+                    return;
+                }
+                if (response.functionCall.name === 'update_calendar_event') {
+                    await this.handleCalendarUpdate(jid, response.functionCall.args, message);
+                    return;
+                }
+                if (response.functionCall.name === 'delete_calendar_event') {
+                    await this.handleCalendarDelete(jid, response.functionCall.args, message);
                     return;
                 }
                 // Unknown function call - log and ignore
@@ -783,6 +802,155 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
             return;
         }
         await this.whatsapp.sendReply(jid, `פקודה לא מוכרת: ${subCommand}\nכתוב /birthdays לעזרה`, originalMessage);
+    }
+    // --- Calendar handlers ---
+    async handleCalendarList(jid, args, originalMessage) {
+        if (!this.calendarService) {
+            await this.whatsapp.sendReply(jid, '❌ שירות היומן לא מוגדר.', originalMessage);
+            return;
+        }
+        const repo = getCalendarLinkRepository();
+        const links = repo.findByJid(jid);
+        if (links.length === 0) {
+            await this.whatsapp.sendReply(jid, '❌ אין לך יומן מקושר. בקש מהמנהל לקשר את היומן שלך.', originalMessage);
+            return;
+        }
+        try {
+            const startDate = args.startDate ? new Date(args.startDate) : new Date();
+            const endDate = args.endDate ? new Date(args.endDate) : new Date(startDate);
+            const startOfDay = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+            const endOfDay = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate() + 1);
+            const events = await this.calendarService.listEventsForJid(jid, startOfDay, endOfDay, args.query);
+            // Build date label
+            const isSameDay = startDate.toDateString() === endDate.toDateString();
+            const today = new Date();
+            let label;
+            if (isSameDay && startDate.toDateString() === today.toDateString()) {
+                label = 'היום';
+            }
+            else if (isSameDay) {
+                label = `ב-${args.startDate}`;
+            }
+            else {
+                label = `מ-${args.startDate} עד ${args.endDate}`;
+            }
+            const formatted = this.calendarService.formatEventList(events, label);
+            await this.whatsapp.sendReply(jid, formatted, originalMessage);
+        }
+        catch (error) {
+            logger.error('Calendar list error:', error);
+            await this.whatsapp.sendReply(jid, '❌ שגיאה בשליפת אירועים מהיומן.', originalMessage);
+        }
+    }
+    async handleCalendarCreate(jid, args, originalMessage) {
+        if (!this.calendarService) {
+            await this.whatsapp.sendReply(jid, '❌ שירות היומן לא מוגדר.', originalMessage);
+            return;
+        }
+        const repo = getCalendarLinkRepository();
+        const defaultLink = repo.findDefaultByJid(jid);
+        if (!defaultLink) {
+            await this.whatsapp.sendReply(jid, '❌ אין לך יומן מקושר. בקש מהמנהל לקשר את היומן שלך.', originalMessage);
+            return;
+        }
+        try {
+            const hour = Math.floor(args.startHour);
+            const minute = args.startMinute ?? 0;
+            const duration = args.durationMinutes ?? 60;
+            const startTime = new Date(`${args.date}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`);
+            const endTime = new Date(startTime.getTime() + duration * 60 * 1000);
+            const event = await this.calendarService.createEventForJid(jid, args.summary, startTime, endTime);
+            if (!event) {
+                await this.whatsapp.sendReply(jid, '❌ לא הצלחתי ליצור את האירוע.', originalMessage);
+                return;
+            }
+            const timeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+            await this.whatsapp.sendReply(jid, `✅ *אירוע נוצר!*\n\n📌 ${args.summary}\n📅 ${args.date}\n🕐 ${timeStr} (${duration} דקות)`, originalMessage);
+        }
+        catch (error) {
+            logger.error('Calendar create error:', error);
+            await this.whatsapp.sendReply(jid, '❌ שגיאה ביצירת אירוע ביומן.', originalMessage);
+        }
+    }
+    async handleCalendarUpdate(jid, args, originalMessage) {
+        if (!this.calendarService) {
+            await this.whatsapp.sendReply(jid, '❌ שירות היומן לא מוגדר.', originalMessage);
+            return;
+        }
+        const repo = getCalendarLinkRepository();
+        const links = repo.findByJid(jid);
+        if (links.length === 0) {
+            await this.whatsapp.sendReply(jid, '❌ אין לך יומן מקושר.', originalMessage);
+            return;
+        }
+        try {
+            const searchDate = new Date(args.searchDate);
+            const found = await this.calendarService.searchEventForJid(jid, args.searchQuery, searchDate);
+            if (!found) {
+                await this.whatsapp.sendReply(jid, `❌ לא מצאתי אירוע "${args.searchQuery}" בתאריך ${args.searchDate}.`, originalMessage);
+                return;
+            }
+            const updates = {};
+            if (args.newSummary)
+                updates.summary = args.newSummary;
+            if (args.newDate || args.newStartHour !== undefined) {
+                // Calculate new start time
+                const existingStart = found.event.start?.dateTime
+                    ? new Date(found.event.start.dateTime)
+                    : new Date(args.searchDate);
+                const existingEnd = found.event.end?.dateTime
+                    ? new Date(found.event.end.dateTime)
+                    : new Date(existingStart.getTime() + 60 * 60 * 1000);
+                const duration = existingEnd.getTime() - existingStart.getTime();
+                const newDate = args.newDate || args.searchDate;
+                const newHour = args.newStartHour ?? existingStart.getHours();
+                const newMinute = args.newStartMinute ?? existingStart.getMinutes();
+                const newStart = new Date(`${newDate}T${String(newHour).padStart(2, '0')}:${String(newMinute).padStart(2, '0')}:00`);
+                updates.start = newStart;
+                updates.end = new Date(newStart.getTime() + duration);
+            }
+            await this.calendarService.updateEvent(found.calendarId, found.event.id, updates);
+            const changes = [];
+            if (args.newSummary)
+                changes.push(`📌 כותרת: ${args.newSummary}`);
+            if (args.newDate)
+                changes.push(`📅 תאריך: ${args.newDate}`);
+            if (args.newStartHour !== undefined) {
+                const m = args.newStartMinute ?? 0;
+                changes.push(`🕐 שעה: ${String(args.newStartHour).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+            }
+            await this.whatsapp.sendReply(jid, `✅ *אירוע עודכן!*\n\nאירוע: "${found.event.summary}"\n${changes.join('\n')}`, originalMessage);
+        }
+        catch (error) {
+            logger.error('Calendar update error:', error);
+            await this.whatsapp.sendReply(jid, '❌ שגיאה בעדכון האירוע.', originalMessage);
+        }
+    }
+    async handleCalendarDelete(jid, args, originalMessage) {
+        if (!this.calendarService) {
+            await this.whatsapp.sendReply(jid, '❌ שירות היומן לא מוגדר.', originalMessage);
+            return;
+        }
+        const repo = getCalendarLinkRepository();
+        const links = repo.findByJid(jid);
+        if (links.length === 0) {
+            await this.whatsapp.sendReply(jid, '❌ אין לך יומן מקושר.', originalMessage);
+            return;
+        }
+        try {
+            const searchDate = new Date(args.searchDate);
+            const found = await this.calendarService.searchEventForJid(jid, args.searchQuery, searchDate);
+            if (!found) {
+                await this.whatsapp.sendReply(jid, `❌ לא מצאתי אירוע "${args.searchQuery}" בתאריך ${args.searchDate}.`, originalMessage);
+                return;
+            }
+            await this.calendarService.deleteEvent(found.calendarId, found.event.id);
+            await this.whatsapp.sendReply(jid, `🗑️ *אירוע נמחק!*\n\n"${found.event.summary}" בתאריך ${args.searchDate}`, originalMessage);
+        }
+        catch (error) {
+            logger.error('Calendar delete error:', error);
+            await this.whatsapp.sendReply(jid, '❌ שגיאה במחיקת האירוע.', originalMessage);
+        }
     }
     extractImagePrompt(text) {
         const lower = text.toLowerCase();
