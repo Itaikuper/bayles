@@ -195,7 +195,11 @@ export class MessageHandler {
             const contextPrefix = isGroup && message.pushName
                 ? `[${message.pushName}]`
                 : undefined;
-            const response = await this.gemini.generateAudioResponse(jid, audioBuffer, mimeType, decision.customPrompt, contextPrefix);
+            const response = await this.gemini.generateAudioResponse(jid, audioBuffer, mimeType, decision.customPrompt, contextPrefix, 'default', sender || undefined);
+            // Extract user facts asynchronously from voice message response
+            const senderJid = sender || jid;
+            this.gemini.extractUserFacts(senderJid, '[הודעה קולית]', response)
+                .catch(err => logger.warn('[memory] Voice extraction failed:', err));
             // Voice mode: convert text response to speech
             if (this.voiceModeJids.has(jid)) {
                 try {

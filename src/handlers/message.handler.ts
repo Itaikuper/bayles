@@ -271,8 +271,15 @@ export class MessageHandler {
         audioBuffer,
         mimeType,
         decision.customPrompt,
-        contextPrefix
+        contextPrefix,
+        'default',
+        sender || undefined
       );
+
+      // Extract user facts asynchronously from voice message response
+      const senderJid = sender || jid;
+      this.gemini.extractUserFacts(senderJid, '[הודעה קולית]', response)
+        .catch(err => logger.warn('[memory] Voice extraction failed:', err));
 
       // Voice mode: convert text response to speech
       if (this.voiceModeJids.has(jid)) {

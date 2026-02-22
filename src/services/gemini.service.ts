@@ -8,6 +8,7 @@ import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { getKnowledgeRepository } from '../database/repositories/knowledge.repository.js';
 import { getUserMemoryRepository } from '../database/repositories/user-memory.repository.js';
+import { getConversationHistoryRepository } from '../database/repositories/conversation-history.repository.js';
 import type { ChatHistory, GeminiResponse } from '../types/index.js';
 
 // Function declaration for natural language scheduling
@@ -124,7 +125,7 @@ export class GeminiService {
     try {
       // Get or initialize conversation history (scoped by tenant)
       const historyKey = `${tenantId}:${jid}`;
-      const history = this.conversationHistory.get(historyKey) || [];
+      const history = this.conversationHistory.get(historyKey) ?? this.loadHistoryFromDb(historyKey, jid, tenantId);
 
       // Get knowledge base for this chat
       const knowledgeRepo = getKnowledgeRepository();
@@ -134,8 +135,12 @@ export class GeminiService {
       const memoryRepo = getUserMemoryRepository();
       const userMemories = memoryRepo.getFormattedMemories(senderJid || jid, tenantId);
 
-      // Use custom prompt if provided, otherwise use default, plus knowledge + memories
-      const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + userMemories + this.getImageInstructions();
+      // Get conversation summaries from compaction
+      const convRepo = getConversationHistoryRepository();
+      const summaries = convRepo.getFormattedSummaries(jid, tenantId);
+
+      // Use custom prompt if provided, otherwise use default, plus knowledge + memories + summaries
+      const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + userMemories + summaries + this.getImageInstructions();
 
       // Get today's date for scheduling context
       const today = new Date();
@@ -218,6 +223,9 @@ export class GeminiService {
 
       this.conversationHistory.set(historyKey, history);
 
+      // Persist to DB
+      getConversationHistoryRepository().addExchange(jid, userMessage, responseText, tenantId);
+
       return { type: 'text', text: responseText };
     } catch (error) {
       logger.error('Gemini API error:', error);
@@ -231,14 +239,24 @@ export class GeminiService {
     mimeType: string,
     customPrompt?: string,
     contextPrefix?: string,
-    tenantId: string = 'default'
+    tenantId: string = 'default',
+    senderJid?: string
   ): Promise<string> {
     try {
       const historyKey = `${tenantId}:${jid}`;
-      const history = this.conversationHistory.get(historyKey) || [];
+      const history = this.conversationHistory.get(historyKey) ?? this.loadHistoryFromDb(historyKey, jid, tenantId);
       const knowledgeRepo = getKnowledgeRepository();
       const knowledgeContext = knowledgeRepo.getFormattedKnowledge(jid);
-      const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + this.getImageInstructions();
+
+      // Load user memories for the sender
+      const memoryRepo = getUserMemoryRepository();
+      const userMemories = memoryRepo.getFormattedMemories(senderJid || jid, tenantId);
+
+      // Get conversation summaries from compaction
+      const convRepo = getConversationHistoryRepository();
+      const summaries = convRepo.getFormattedSummaries(jid, tenantId);
+
+      const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + userMemories + summaries + this.getImageInstructions();
 
       const chat = this.ai.chats.create({
         model: config.geminiModel,
@@ -260,8 +278,8 @@ export class GeminiService {
 
       const base64Audio = audioBuffer.toString('base64');
       const textPrompt = contextPrefix
-        ? `${contextPrefix} The user sent a voice message. Listen to it and respond appropriately.`
-        : 'The user sent a voice message. Listen to it and respond appropriately.';
+        ? `${contextPrefix} המשתמש שלח הודעה קולית. הקשב לתוכן ההודעה הקולית המצורפת וענה בהתאם.`
+        : 'המשתמש שלח הודעה קולית. הקשב לתוכן ההודעה הקולית המצורפת וענה בהתאם.';
 
       const response = await chat.sendMessage({
         message: [
@@ -286,6 +304,10 @@ export class GeminiService {
       }
 
       this.conversationHistory.set(historyKey, history);
+
+      // Persist to DB
+      convRepo.addExchange(jid, historyLabel, responseText, tenantId);
+
       return responseText;
     } catch (error) {
       logger.error('Gemini audio API error:', error);
@@ -305,10 +327,15 @@ export class GeminiService {
   ): Promise<string> {
     try {
       const historyKey = `${tenantId}:${jid}`;
-      const history = this.conversationHistory.get(historyKey) || [];
+      const history = this.conversationHistory.get(historyKey) ?? this.loadHistoryFromDb(historyKey, jid, tenantId);
       const knowledgeRepo = getKnowledgeRepository();
       const knowledgeContext = knowledgeRepo.getFormattedKnowledge(jid);
-      const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + this.getImageInstructions();
+
+      // Get conversation summaries from compaction
+      const convRepo = getConversationHistoryRepository();
+      const summaries = convRepo.getFormattedSummaries(jid, tenantId);
+
+      const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + summaries + this.getImageInstructions();
 
       const chat = this.ai.chats.create({
         model: config.geminiModel,
@@ -371,6 +398,10 @@ export class GeminiService {
       }
 
       this.conversationHistory.set(historyKey, history);
+
+      // Persist to DB
+      getConversationHistoryRepository().addExchange(jid, historyText, responseText, tenantId);
+
       return responseText;
     } catch (error) {
       logger.error('Gemini document analysis error:', error);
@@ -583,6 +614,26 @@ Respond with ONLY the JSON array, nothing else.`;
     } catch (error) {
       logger.warn('[memory] Extraction failed:', error);
     }
+  }
+
+  /**
+   * Lazy-load conversation history from DB on first access for a JID.
+   * Converts DB rows into the ChatHistory format used by the in-memory cache.
+   */
+  private loadHistoryFromDb(historyKey: string, jid: string, tenantId: string): ChatHistory[] {
+    const convRepo = getConversationHistoryRepository();
+    const dbMessages = convRepo.getRecent(jid, tenantId, this.maxHistoryLength);
+
+    const history: ChatHistory[] = dbMessages.map(msg => ({
+      role: msg.role,
+      parts: [{ text: msg.content }],
+    }));
+
+    this.conversationHistory.set(historyKey, history);
+    if (history.length > 0) {
+      logger.info(`Loaded ${history.length} messages from DB for ${historyKey}`);
+    }
+    return history;
   }
 
   clearHistory(jid: string, tenantId: string = 'default'): void {

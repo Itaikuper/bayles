@@ -304,4 +304,44 @@ export function runMigrations(): void {
     db.prepare('INSERT INTO migrations (name) VALUES (?)').run('008_user_memories');
     logger.info('Migration 008_user_memories completed');
   }
+
+  // Migration 009: Conversation history persistence + compaction summaries
+  const applied009 = db.prepare('SELECT name FROM migrations WHERE name = ?').get('009_conversation_history');
+
+  if (!applied009) {
+    logger.info('Running migration: 009_conversation_history');
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS conversation_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        jid TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('user', 'model')),
+        content TEXT NOT NULL,
+        tenant_id TEXT DEFAULT 'default',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_conv_history_jid_tenant ON conversation_history(jid, tenant_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_conv_history_created ON conversation_history(created_at)`);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS conversation_summaries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        jid TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        message_count INTEGER DEFAULT 0,
+        tenant_id TEXT DEFAULT 'default',
+        period_start DATETIME,
+        period_end DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_conv_summaries_jid_tenant ON conversation_summaries(jid, tenant_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_conv_summaries_created ON conversation_summaries(created_at)`);
+
+    db.prepare('INSERT INTO migrations (name) VALUES (?)').run('009_conversation_history');
+    logger.info('Migration 009_conversation_history completed');
+  }
 }

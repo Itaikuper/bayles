@@ -2,6 +2,7 @@ import { WhatsAppService } from './services/whatsapp.service.js';
 import { GeminiService } from './services/gemini.service.js';
 import { SchedulerService } from './services/scheduler.service.js';
 import { BirthdayService } from './services/birthday.service.js';
+import { CompactionService } from './services/compaction.service.js';
 import { getBotControlService } from './services/bot-control.service.js';
 import { MessageHandler } from './handlers/message.handler.js';
 import { validateConfig, config } from './config/env.js';
@@ -40,6 +41,9 @@ async function main() {
         // Initialize birthday service
         const birthdayService = new BirthdayService(whatsapp, gemini);
         birthdayService.start();
+        // Initialize conversation compaction service
+        const compactionService = new CompactionService(gemini);
+        compactionService.start();
         // Initialize bot control service
         const botControl = getBotControlService();
         // Initialize message handler
@@ -155,6 +159,7 @@ async function main() {
             logger.info('Shutting down...');
             scheduler.cancelAll();
             birthdayService.stop();
+            compactionService.stop();
             await pool.disconnectAll();
             closeDatabase();
             process.exit(0);

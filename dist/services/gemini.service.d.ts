@@ -6,7 +6,7 @@ export declare class GeminiService {
     constructor();
     private getImageInstructions;
     generateResponse(jid: string, userMessage: string, customPrompt?: string, tenantId?: string, senderJid?: string): Promise<GeminiResponse>;
-    generateAudioResponse(jid: string, audioBuffer: Buffer, mimeType: string, customPrompt?: string, contextPrefix?: string, tenantId?: string): Promise<string>;
+    generateAudioResponse(jid: string, audioBuffer: Buffer, mimeType: string, customPrompt?: string, contextPrefix?: string, tenantId?: string, senderJid?: string): Promise<string>;
     generateDocumentAnalysisResponse(jid: string, mediaBuffer: Buffer, mimeType: string, caption?: string, customPrompt?: string, contextPrefix?: string, fileName?: string, tenantId?: string): Promise<string>;
     generateImage(prompt: string, pro?: boolean): Promise<{
         image: Buffer;
@@ -24,6 +24,11 @@ export declare class GeminiService {
      * Runs asynchronously after sending the AI response - does not block.
      */
     extractUserFacts(senderJid: string, userMessage: string, botResponse: string, tenantId?: string): Promise<void>;
+    /**
+     * Lazy-load conversation history from DB on first access for a JID.
+     * Converts DB rows into the ChatHistory format used by the in-memory cache.
+     */
+    private loadHistoryFromDb;
     clearHistory(jid: string, tenantId?: string): void;
     clearAllHistory(): void;
     listConversations(): {
