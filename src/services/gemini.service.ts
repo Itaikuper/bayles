@@ -277,7 +277,7 @@ export class GeminiService {
       });
 
       const base64Audio = audioBuffer.toString('base64');
-      const voiceInstruction = 'הקובץ המצורף הוא הקלטת אודיו של המשתמש. תמלל את מה שנאמר בהקלטה וענה לתוכן. אל תגיד שאתה לא יכול להקשיב או לשמוע - קובץ האודיו מצורף ואתה מסוגל לעבד אותו.';
+      const voiceInstruction = 'הקובץ המצורף הוא הקלטת אודיו של המשתמש. הקשב והגב ישירות לתוכן, בלי לצטט או לחזור על מה שנאמר.';
       const textPrompt = contextPrefix
         ? `${contextPrefix} ${voiceInstruction}`
         : voiceInstruction;
