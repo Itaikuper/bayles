@@ -266,6 +266,28 @@ export class GeminiService {
             return 'Sorry, I encountered an error processing the voice message.';
         }
     }
+    async transcribeAudio(audioBuffer, mimeType) {
+        try {
+            const base64Audio = audioBuffer.toString('base64');
+            const response = await this.ai.models.generateContent({
+                model: config.geminiModel,
+                contents: [
+                    {
+                        role: 'user',
+                        parts: [
+                            { inlineData: { mimeType, data: base64Audio } },
+                            { text: 'תמלל את ההקלטה מילה במילה. כתוב רק את מה שנאמר, בלי הקדמה, בלי סיכום, בלי פרשנות. אם אין דיבור, כתוב "לא זוהה דיבור".' },
+                        ],
+                    },
+                ],
+            });
+            return response.text || 'לא הצלחתי לתמלל את ההקלטה.';
+        }
+        catch (error) {
+            logger.error('Gemini transcription error:', error);
+            return 'שגיאה בתמלול ההקלטה. נסה שוב.';
+        }
+    }
     async generateDocumentAnalysisResponse(jid, mediaBuffer, mimeType, caption, customPrompt, contextPrefix, fileName, tenantId = 'default') {
         try {
             const historyKey = `${tenantId}:${jid}`;

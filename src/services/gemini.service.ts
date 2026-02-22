@@ -316,6 +316,30 @@ export class GeminiService {
     }
   }
 
+  async transcribeAudio(audioBuffer: Buffer, mimeType: string): Promise<string> {
+    try {
+      const base64Audio = audioBuffer.toString('base64');
+
+      const response = await this.ai.models.generateContent({
+        model: config.geminiModel,
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { inlineData: { mimeType, data: base64Audio } },
+              { text: 'תמלל את ההקלטה מילה במילה. כתוב רק את מה שנאמר, בלי הקדמה, בלי סיכום, בלי פרשנות. אם אין דיבור, כתוב "לא זוהה דיבור".' },
+            ],
+          },
+        ],
+      });
+
+      return response.text || 'לא הצלחתי לתמלל את ההקלטה.';
+    } catch (error) {
+      logger.error('Gemini transcription error:', error);
+      return 'שגיאה בתמלול ההקלטה. נסה שוב.';
+    }
+  }
+
   async generateDocumentAnalysisResponse(
     jid: string,
     mediaBuffer: Buffer,

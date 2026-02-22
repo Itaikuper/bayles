@@ -55,6 +55,14 @@ export class MessageHandler {
         const text = this.extractText(message);
         if (!text)
             return;
+        // Handle "תמלל" command - transcribe a quoted voice message
+        if (/^תמלל\s*$/.test(text)) {
+            const quotedAudio = message.message?.extendedTextMessage?.contextInfo?.quotedMessage?.audioMessage;
+            if (quotedAudio) {
+                await this.handleTranscribeCommand(message, jid, quotedAudio);
+                return;
+            }
+        }
         const isGroup = jid.endsWith('@g.us');
         const sender = isGroup ? message.key.participant : jid;
         logger.info(`Message from ${sender} in ${isGroup ? 'group' : 'DM'}: ${text}`);
@@ -218,6 +226,19 @@ export class MessageHandler {
         catch (error) {
             logger.error('Error processing voice message:', error);
             await this.whatsapp.sendReply(jid, 'סליחה, לא הצלחתי לעבד את ההודעה הקולית. נסה שוב.', message);
+        }
+    }
+    async handleTranscribeCommand(message, jid, audioMessage) {
+        try {
+            await this.whatsapp.sendReply(jid, '🎙️ מתמלל...', message);
+            const audioBuffer = await this.whatsapp.downloadAudio(audioMessage);
+            const mimeType = audioMessage.mimetype || 'audio/ogg; codecs=opus';
+            const transcription = await this.gemini.transcribeAudio(audioBuffer, mimeType);
+            await this.whatsapp.sendReply(jid, `📝 *תמלול:*\n\n${transcription}`, message);
+        }
+        catch (error) {
+            logger.error('Error transcribing voice message:', error);
+            await this.whatsapp.sendReply(jid, 'סליחה, לא הצלחתי לתמלל את ההודעה הקולית. נסה שוב.', message);
         }
     }
     async handleImageMessage(message, jid, imageMessage) {
@@ -860,6 +881,7 @@ PRO: "ייצר תמונת פרו של..." / "תמונת פרו של..."
 /groups - List all groups with IDs
 /schedule - Schedule a message
 /scheduled - List scheduled messages
+תמלל - השב להודעה קולית כדי לקבל תמלול מילה במילה
 
 *Examples:*
 ${config.botPrefix} What's the weather like?

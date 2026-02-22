@@ -15,6 +15,7 @@ export declare class MessageHandler {
     handle(message: proto.IWebMessageInfo): Promise<void>;
     private extractText;
     private handleAudioMessage;
+    private handleTranscribeCommand;
     private handleImageMessage;
     private handleDocumentMessage;
     private parseImageTags;

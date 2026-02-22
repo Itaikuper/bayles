@@ -7,6 +7,7 @@ export declare class GeminiService {
     private getImageInstructions;
     generateResponse(jid: string, userMessage: string, customPrompt?: string, tenantId?: string, senderJid?: string): Promise<GeminiResponse>;
     generateAudioResponse(jid: string, audioBuffer: Buffer, mimeType: string, customPrompt?: string, contextPrefix?: string, tenantId?: string, senderJid?: string): Promise<string>;
+    transcribeAudio(audioBuffer: Buffer, mimeType: string): Promise<string>;
     generateDocumentAnalysisResponse(jid: string, mediaBuffer: Buffer, mimeType: string, caption?: string, customPrompt?: string, contextPrefix?: string, fileName?: string, tenantId?: string): Promise<string>;
     generateImage(prompt: string, pro?: boolean): Promise<{
         image: Buffer;
