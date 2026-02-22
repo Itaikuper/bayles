@@ -57,7 +57,11 @@ export class MessageHandler {
             return;
         // Handle "תמלל" command - transcribe a quoted voice message
         if (/^תמלל\s*$/.test(text)) {
-            const quotedAudio = message.message?.extendedTextMessage?.contextInfo?.quotedMessage?.audioMessage;
+            const quotedMessage = message.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+            if (quotedMessage) {
+                logger.info(`DEBUG תמלל quotedMessage keys: ${JSON.stringify(Object.keys(quotedMessage))}`);
+            }
+            const quotedAudio = quotedMessage?.audioMessage;
             if (quotedAudio) {
                 await this.handleTranscribeCommand(message, jid, quotedAudio);
                 return;
