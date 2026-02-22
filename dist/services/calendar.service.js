@@ -8,6 +8,8 @@ export class CalendarService {
     whatsapp;
     calendar;
     cronTask = null;
+    reminderCronTask = null;
+    sentReminders = new Set(); // "eventId:jid" to avoid duplicates
     constructor(whatsapp) {
         this.whatsapp = whatsapp;
         // Initialize Google Calendar API with service account
@@ -25,13 +27,27 @@ export class CalendarService {
             this.sendDailySummaries().catch(err => logger.error('Daily calendar summary error:', err));
         }, { timezone: config.calendarTimezone });
         logger.info(`Calendar daily summary cron started: ${config.calendarDailySummaryCron}`);
+        // Reminder cron: check every 5 minutes for upcoming events
+        this.reminderCronTask = cron.schedule('*/5 * * * *', () => {
+            this.checkAndSendReminders().catch(err => logger.error('Calendar reminder error:', err));
+        }, { timezone: config.calendarTimezone });
+        logger.info('Calendar reminder cron started (every 5 min)');
+        // Clear sent reminders daily at midnight
+        cron.schedule('0 0 * * *', () => {
+            this.sentReminders.clear();
+            logger.info('Cleared sent reminders cache');
+        }, { timezone: config.calendarTimezone });
     }
     stop() {
         if (this.cronTask) {
             this.cronTask.stop();
             this.cronTask = null;
-            logger.info('Calendar daily summary cron stopped');
         }
+        if (this.reminderCronTask) {
+            this.reminderCronTask.stop();
+            this.reminderCronTask = null;
+        }
+        logger.info('Calendar crons stopped');
     }
     async sendDailySummaries() {
         const repo = getCalendarLinkRepository();
@@ -70,6 +86,73 @@ export class CalendarService {
             }
             catch (err) {
                 logger.error(`Failed to send daily summary to ${jid}:`, err);
+            }
+        }
+    }
+    async checkAndSendReminders() {
+        const repo = getCalendarLinkRepository();
+        const links = repo.findReminderLinks();
+        if (links.length === 0)
+            return;
+        const now = new Date();
+        // Group links by JID with their max reminder window
+        const byJid = new Map();
+        for (const link of links) {
+            const existing = byJid.get(link.jid);
+            if (existing) {
+                existing.calendarIds.push(link.calendar_id);
+                existing.reminderMinutes = Math.max(existing.reminderMinutes, link.reminder_minutes);
+            }
+            else {
+                byJid.set(link.jid, {
+                    calendarIds: [link.calendar_id],
+                    reminderMinutes: link.reminder_minutes,
+                });
+            }
+        }
+        for (const [jid, { calendarIds, reminderMinutes }] of byJid) {
+            try {
+                // Look ahead by reminderMinutes + 5 min buffer (to catch events in the window)
+                const windowEnd = new Date(now.getTime() + (reminderMinutes + 5) * 60 * 1000);
+                for (const calId of calendarIds) {
+                    const events = await this.listEvents(calId, now, windowEnd);
+                    for (const event of events) {
+                        const eventId = event.id;
+                        if (!eventId)
+                            continue;
+                        const reminderKey = `${eventId}:${jid}`;
+                        if (this.sentReminders.has(reminderKey))
+                            continue;
+                        // Check if event starts within the reminder window
+                        const eventStart = event.start?.dateTime ? new Date(event.start.dateTime) : null;
+                        if (!eventStart)
+                            continue; // skip all-day events
+                        const minutesUntilStart = (eventStart.getTime() - now.getTime()) / (60 * 1000);
+                        if (minutesUntilStart > 0 && minutesUntilStart <= reminderMinutes) {
+                            // Send reminder
+                            const summary = event.summary || '(ללא כותרת)';
+                            const timeStr = `${String(eventStart.getHours()).padStart(2, '0')}:${String(eventStart.getMinutes()).padStart(2, '0')}`;
+                            const minutesLeft = Math.round(minutesUntilStart);
+                            let msg = `⏰ *תזכורת*: ${summary}\n🕐 בעוד ${minutesLeft} דקות (${timeStr})`;
+                            if (event.location) {
+                                msg += `\n📍 ${event.location}`;
+                            }
+                            if (event.description) {
+                                // Truncate long descriptions
+                                const desc = event.description.length > 200
+                                    ? event.description.substring(0, 200) + '...'
+                                    : event.description;
+                                msg += `\n📝 ${desc}`;
+                            }
+                            await this.whatsapp.sendTextMessage(jid, msg);
+                            this.sentReminders.add(reminderKey);
+                            logger.info(`Sent reminder to ${jid} for event "${summary}" starting at ${timeStr}`);
+                        }
+                    }
+                }
+            }
+            catch (err) {
+                logger.error(`Failed to check reminders for ${jid}:`, err);
             }
         }
     }

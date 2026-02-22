@@ -25,6 +25,12 @@ export class CalendarLinkRepository {
             .prepare('SELECT * FROM calendar_links WHERE daily_summary = 1 AND tenant_id = ?')
             .all(tenantId);
     }
+    findReminderLinks(tenantId = 'default') {
+        const db = getDatabase();
+        return db
+            .prepare('SELECT * FROM calendar_links WHERE reminder_minutes IS NOT NULL AND tenant_id = ?')
+            .all(tenantId);
+    }
     getAll(tenantId = 'default') {
         const db = getDatabase();
         return db
@@ -59,6 +65,10 @@ export class CalendarLinkRepository {
         if (fields.daily_summary !== undefined) {
             setClauses.push('daily_summary = ?');
             values.push(fields.daily_summary);
+        }
+        if (fields.reminder_minutes !== undefined) {
+            setClauses.push('reminder_minutes = ?');
+            values.push(fields.reminder_minutes);
         }
         if (setClauses.length === 0)
             return false;

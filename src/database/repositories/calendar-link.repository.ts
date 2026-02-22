@@ -7,6 +7,7 @@ export interface CalendarLinkRecord {
   display_name: string | null;
   is_default: number;
   daily_summary: number;
+  reminder_minutes: number | null;
   tenant_id: string;
   created_at: string;
 }
@@ -42,6 +43,13 @@ export class CalendarLinkRepository {
       .all(tenantId) as CalendarLinkRecord[];
   }
 
+  findReminderLinks(tenantId: string = 'default'): CalendarLinkRecord[] {
+    const db = getDatabase();
+    return db
+      .prepare('SELECT * FROM calendar_links WHERE reminder_minutes IS NOT NULL AND tenant_id = ?')
+      .all(tenantId) as CalendarLinkRecord[];
+  }
+
   getAll(tenantId: string = 'default'): CalendarLinkRecord[] {
     const db = getDatabase();
     return db
@@ -64,7 +72,7 @@ export class CalendarLinkRepository {
     return result.lastInsertRowid as number;
   }
 
-  update(id: number, fields: Partial<Pick<CalendarLinkRecord, 'display_name' | 'is_default' | 'daily_summary'>>): boolean {
+  update(id: number, fields: Partial<Pick<CalendarLinkRecord, 'display_name' | 'is_default' | 'daily_summary' | 'reminder_minutes'>>): boolean {
     const db = getDatabase();
     const setClauses: string[] = [];
     const values: unknown[] = [];
@@ -80,6 +88,10 @@ export class CalendarLinkRepository {
     if (fields.daily_summary !== undefined) {
       setClauses.push('daily_summary = ?');
       values.push(fields.daily_summary);
+    }
+    if (fields.reminder_minutes !== undefined) {
+      setClauses.push('reminder_minutes = ?');
+      values.push(fields.reminder_minutes);
     }
 
     if (setClauses.length === 0) return false;

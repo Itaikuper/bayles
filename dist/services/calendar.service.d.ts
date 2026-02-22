@@ -4,10 +4,13 @@ export declare class CalendarService {
     private whatsapp;
     private calendar;
     private cronTask;
+    private reminderCronTask;
+    private sentReminders;
     constructor(whatsapp: WhatsAppService);
     start(): void;
     stop(): void;
     sendDailySummaries(): Promise<void>;
+    checkAndSendReminders(): Promise<void>;
     listEvents(calendarId: string, timeMin: Date, timeMax: Date, query?: string): Promise<calendar_v3.Schema$Event[]>;
     createEvent(calendarId: string, summary: string, startTime: Date, endTime: Date): Promise<calendar_v3.Schema$Event>;
     updateEvent(calendarId: string, eventId: string, updates: {

@@ -2410,6 +2410,7 @@ function Calendar() {
         display_name: editLink.display_name,
         is_default: editLink.is_default,
         daily_summary: editLink.daily_summary,
+        reminder_minutes: editLink.reminder_minutes,
       });
       setEditLink(null);
       loadData();
@@ -2499,6 +2500,7 @@ function Calendar() {
                   React.createElement('th', null, 'שם תצוגה'),
                   React.createElement('th', null, 'ברירת מחדל'),
                   React.createElement('th', null, 'סיכום יומי'),
+                  React.createElement('th', null, 'תזכורת'),
                   React.createElement('th', null, 'פעולות')
                 )
               ),
@@ -2517,6 +2519,11 @@ function Calendar() {
                       React.createElement('span', { className: `badge ${link.daily_summary ? 'badge-success' : 'badge-secondary'}` },
                         link.daily_summary ? 'כן' : 'לא'
                       )
+                    ),
+                    React.createElement('td', null,
+                      link.reminder_minutes
+                        ? React.createElement('span', { className: 'badge badge-success' }, link.reminder_minutes + ' דק׳')
+                        : React.createElement('span', { className: 'badge badge-secondary' }, 'כבוי')
                     ),
                     React.createElement('td', null,
                       React.createElement('button', {
@@ -2676,6 +2683,18 @@ function Calendar() {
                 onChange: e => setEditLink({ ...editLink, daily_summary: e.target.checked ? 1 : 0 })
               }),
               ' סיכום יומי (שליחת אירועי היום כל בוקר)'
+            )
+          ),
+          React.createElement('div', { className: 'form-group' },
+            React.createElement('label', null, 'תזכורת לפני אירוע (דקות)'),
+            React.createElement('select', {
+              value: editLink.reminder_minutes || '',
+              onChange: e => setEditLink({ ...editLink, reminder_minutes: e.target.value ? parseInt(e.target.value) : null })
+            },
+              React.createElement('option', { value: '' }, 'כבוי'),
+              React.createElement('option', { value: '15' }, '15 דקות'),
+              React.createElement('option', { value: '30' }, '30 דקות'),
+              React.createElement('option', { value: '60' }, 'שעה')
             )
           )
         ),

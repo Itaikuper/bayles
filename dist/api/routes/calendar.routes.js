@@ -33,8 +33,8 @@ export function createCalendarRoutes(calendarService) {
         const existing = repo.getById(id);
         if (!existing)
             return res.status(404).json({ error: 'Link not found' });
-        const { display_name, is_default, daily_summary } = req.body;
-        const updated = repo.update(id, { display_name, is_default, daily_summary });
+        const { display_name, is_default, daily_summary, reminder_minutes } = req.body;
+        const updated = repo.update(id, { display_name, is_default, daily_summary, reminder_minutes });
         if (updated) {
             res.json(repo.getById(id));
         }

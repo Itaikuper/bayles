@@ -308,4 +308,12 @@ export function runMigrations() {
         db.prepare('INSERT INTO migrations (name) VALUES (?)').run('010_calendar_links');
         logger.info('Migration 010_calendar_links completed');
     }
+    // Migration 011: Calendar event reminders
+    const applied011 = db.prepare('SELECT name FROM migrations WHERE name = ?').get('011_calendar_reminders');
+    if (!applied011) {
+        logger.info('Running migration: 011_calendar_reminders');
+        db.exec(`ALTER TABLE calendar_links ADD COLUMN reminder_minutes INTEGER DEFAULT NULL`);
+        db.prepare('INSERT INTO migrations (name) VALUES (?)').run('011_calendar_reminders');
+        logger.info('Migration 011_calendar_reminders completed');
+    }
 }
