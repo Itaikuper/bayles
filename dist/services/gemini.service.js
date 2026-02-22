@@ -237,9 +237,10 @@ export class GeminiService {
                 ],
             });
             const base64Audio = audioBuffer.toString('base64');
+            const voiceInstruction = 'הקובץ המצורף הוא הקלטת אודיו של המשתמש. תמלל את מה שנאמר בהקלטה וענה לתוכן. אל תגיד שאתה לא יכול להקשיב או לשמוע - קובץ האודיו מצורף ואתה מסוגל לעבד אותו.';
             const textPrompt = contextPrefix
-                ? `${contextPrefix} המשתמש שלח הודעה קולית. הקשב לתוכן ההודעה הקולית המצורפת וענה בהתאם.`
-                : 'המשתמש שלח הודעה קולית. הקשב לתוכן ההודעה הקולית המצורפת וענה בהתאם.';
+                ? `${contextPrefix} ${voiceInstruction}`
+                : voiceInstruction;
             const response = await chat.sendMessage({
                 message: [
                     { inlineData: { mimeType, data: base64Audio } },
