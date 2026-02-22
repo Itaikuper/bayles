@@ -261,7 +261,7 @@ export class GeminiService {
       const schedulingKeywords = /תזמן|תזכיר|תשלח בשעה|כל יום|מחר בשעה|schedule|remind|תקבע|הזכר לי|בשעה \d/i;
       const songKeywords = /שיר|אקורד|טאב|גיטרה|chord|song|tab|לנגן|תנגן|אקורד/i;
       const contactKeywords = /טלפון|פלאפון|מספר של|איש קשר|phone|contact|number/i;
-      const calendarKeywords = /מה יש לי|יומן|אירוע|פגישה|לוח|תוסיף אירוע|תקבע פגישה|תכניס ליומן|תמחק אירוע|תבטל פגישה|תשנה אירוע|תזיז|תעדכן אירוע|calendar|events|meeting/i;
+      const calendarKeywords = /מה יש לי|יומן|אירוע|פגישה|לוח|לוז|תוסיף אירוע|תקבע פגישה|תכניס ליומן|תמחק אירוע|תבטל פגישה|תשנה אירוע|תזיז|תעדכן אירוע|calendar|events|meeting|schedule|agenda/i;
       const isSchedulingRequest = schedulingKeywords.test(userMessage);
       const isSongRequest = songKeywords.test(userMessage);
       const isContactRequest = contactKeywords.test(userMessage);
