@@ -81,7 +81,7 @@ const searchContactDeclaration = {
 // Function declaration for sending messages to other people/groups
 const sendMessageDeclaration = {
     name: 'send_message',
-    description: 'Send a message to another person or group. Use when user asks to send, tell, notify, or forward a message to someone else. Keywords: תשלח ל, שלח ל, תגיד ל, תודיע ל, תעביר ל, הודעה ל, send to, tell, forward to.',
+    description: 'Send a message to another person or group. ALWAYS use this function when the user wants to send/tell/notify someone else, even if phrased as a question (e.g., "תוכל לשלוח...?"). Keywords: תשלח ל, שלח ל, לשלוח הודעה, תגיד ל, תודיע ל, תעביר ל, הודעה ל, send to, tell, forward to.',
     parameters: {
         type: Type.OBJECT,
         properties: {
@@ -283,7 +283,7 @@ export class GeminiService {
             const songKeywords = /שיר|אקורד|טאב|גיטרה|chord|song|tab|לנגן|תנגן|אקורד/i;
             const contactKeywords = /טלפון|פלאפון|מספר של|איש קשר|phone|contact|number/i;
             const calendarKeywords = /מה יש לי|יומן|אירוע|פגישה|לוח|לוז|תוסיף אירוע|תקבע פגישה|תכניס ליומן|תמחק אירוע|תבטל פגישה|תשנה אירוע|תזיז|תעדכן אירוע|calendar|events|meeting|schedule|agenda/i;
-            const sendMessageKeywords = /תשלח ל|שלח ל|תגיד ל|תודיע ל|תעביר ל|הודעה ל|send to|tell .+ that|forward to/i;
+            const sendMessageKeywords = /תשלח ל|שלח ל|לשלוח ל|לשלוח הודעה|תגיד ל|תודיע ל|תעביר ל|הודעה ל|send to|tell .+ that|forward to/i;
             const isSchedulingRequest = schedulingKeywords.test(userMessage);
             const isSongRequest = songKeywords.test(userMessage);
             const isContactRequest = contactKeywords.test(userMessage);
