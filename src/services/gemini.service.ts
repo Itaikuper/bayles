@@ -97,11 +97,11 @@ const sendMessageDeclaration: FunctionDeclaration = {
       },
       messageContent: {
         type: Type.STRING,
-        description: 'The message text to send, or the topic/instruction for AI-generated content if generateContent=true. Examples: "שאני מאחר", "ברכת יום הולדת", "שלום מה נשמע"',
+        description: 'When generateContent=false: the exact text to send. When generateContent=true: describe WHAT to create (e.g., "שיר אהבה קצר", "ברכת יום הולדת מצחיקה", "שיר לפורים"). Be descriptive about the desired content style and theme.',
       },
       generateContent: {
         type: Type.BOOLEAN,
-        description: 'Set to TRUE when the user wants AI to compose the message (e.g., "תשלח ברכה", "תשלח משהו יפה"). Set to FALSE when the user specifies exact text to send (e.g., "תשלח לדוד שאני מאחר").',
+        description: 'Set to TRUE when the user wants AI to CREATE/COMPOSE content (songs, poems, greetings, stories, creative text). TRUE examples: "שלח שיר אהבה", "שלח ברכה", "שלח משהו יפה", "שלח שיר לפורים". Set to FALSE ONLY when the user specifies the exact literal text to send. FALSE examples: "שלח לדוד שאני מאחר", "שלח לאמא שלום". When in doubt, set to TRUE.',
       },
       timing: {
         type: Type.STRING,

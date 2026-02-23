@@ -1476,10 +1476,11 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
       }
 
       // Prepare content
+      logger.info(`[send_message] target="${args.targetName}" generateContent=${args.generateContent} messageContent="${args.messageContent}"`);
       let content = args.messageContent;
       if (args.generateContent) {
         content = await this.gemini.generateScheduledContent(
-          `כתוב הודעת WhatsApp קצרה וטבעית בעברית בנושא: ${args.messageContent}. כתוב רק את ההודעה עצמה, בלי הקדמה.`
+          `צור תוכן בעברית לפי הבקשה הבאה: ${args.messageContent}. אם מבקשים שיר - כתוב שיר עם בתים וחרוזים. אם מבקשים ברכה - כתוב ברכה יפה ומלאה. אם מבקשים סיפור - כתוב סיפור. התאם את אורך התוכן לסוג הבקשה. כתוב רק את התוכן עצמו, בלי הקדמה או הסבר.`
         );
       }
 

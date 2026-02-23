@@ -1045,9 +1045,10 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
                 return `[ניסיתי לשלוח הודעה ל"${args.targetName}" אבל לא מצאתי את הנמען]`;
             }
             // Prepare content
+            logger.info(`[send_message] target="${args.targetName}" generateContent=${args.generateContent} messageContent="${args.messageContent}"`);
             let content = args.messageContent;
             if (args.generateContent) {
-                content = await this.gemini.generateScheduledContent(`כתוב הודעת WhatsApp קצרה וטבעית בעברית בנושא: ${args.messageContent}. כתוב רק את ההודעה עצמה, בלי הקדמה.`);
+                content = await this.gemini.generateScheduledContent(`צור תוכן בעברית לפי הבקשה הבאה: ${args.messageContent}. אם מבקשים שיר - כתוב שיר עם בתים וחרוזים. אם מבקשים ברכה - כתוב ברכה יפה ומלאה. אם מבקשים סיפור - כתוב סיפור. התאם את אורך התוכן לסוג הבקשה. כתוב רק את התוכן עצמו, בלי הקדמה או הסבר.`);
             }
             // Format with sender attribution and reply instruction
             const outgoingMessage = `📩 *${senderName}* שלח/ה לך הודעה:\n\n${content}\n\n↩️ _השב/י על הודעה זו כדי לשלוח תשובה_`;
