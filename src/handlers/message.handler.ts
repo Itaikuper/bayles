@@ -985,10 +985,11 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
       return currentJid;
     }
 
+    const normalizedTarget = targetName.toLowerCase().replace(/קבוצת\s*/i, '').replace(/ערוץ\s*/i, '');
+
     // Search in groups
     try {
       const groups = await this.whatsapp.getGroups();
-      const normalizedTarget = targetName.toLowerCase().replace(/קבוצת\s*/i, '');
 
       // Try exact match first
       let match = groups.find(g => g.name.toLowerCase() === normalizedTarget);
@@ -1007,6 +1008,19 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
       }
     } catch (error) {
       logger.warn('Error searching groups for target:', error);
+    }
+
+    // Search in whitelisted chats (includes channels/newsletters)
+    const allChats = this.botControl.getAllChats();
+    const chatMatch = allChats.find(c =>
+      c.display_name?.toLowerCase() === normalizedTarget
+    ) || allChats.find(c =>
+      c.display_name?.toLowerCase().includes(normalizedTarget) ||
+      normalizedTarget.includes(c.display_name?.toLowerCase() || '')
+    );
+    if (chatMatch) {
+      logger.info(`Resolved target "${targetName}" to whitelisted chat ${chatMatch.display_name} (${chatMatch.jid})`);
+      return chatMatch.jid;
     }
 
     // Fallback to current chat
