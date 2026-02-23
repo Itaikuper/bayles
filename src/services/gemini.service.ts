@@ -84,6 +84,46 @@ const searchContactDeclaration: FunctionDeclaration = {
   },
 };
 
+// Function declaration for sending messages to other people/groups
+const sendMessageDeclaration: FunctionDeclaration = {
+  name: 'send_message',
+  description: 'Send a message to another person or group. Use when user asks to send, tell, notify, or forward a message to someone else. Keywords: תשלח ל, שלח ל, תגיד ל, תודיע ל, תעביר ל, הודעה ל, send to, tell, forward to.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      targetName: {
+        type: Type.STRING,
+        description: 'Contact name, group name, or phone number of the recipient. Examples: "דוד", "אמא", "קבוצת המשפחה", "0501234567"',
+      },
+      messageContent: {
+        type: Type.STRING,
+        description: 'The message text to send, or the topic/instruction for AI-generated content if generateContent=true. Examples: "שאני מאחר", "ברכת יום הולדת", "שלום מה נשמע"',
+      },
+      generateContent: {
+        type: Type.BOOLEAN,
+        description: 'Set to TRUE when the user wants AI to compose the message (e.g., "תשלח ברכה", "תשלח משהו יפה"). Set to FALSE when the user specifies exact text to send (e.g., "תשלח לדוד שאני מאחר").',
+      },
+      timing: {
+        type: Type.STRING,
+        description: 'When to send: "now" for immediate, or natural language time like "בעוד חצי שעה", "מחר ב-9". Default to "now" if not specified.',
+      },
+      scheduledDate: {
+        type: Type.STRING,
+        description: 'ISO date (YYYY-MM-DD) if scheduling for later. Calculate from today.',
+      },
+      scheduledHour: {
+        type: Type.NUMBER,
+        description: 'Hour in 24h format (0-23) if scheduling for later.',
+      },
+      scheduledMinute: {
+        type: Type.NUMBER,
+        description: 'Minute (0-59) if scheduling for later. Default to 0.',
+      },
+    },
+    required: ['targetName', 'messageContent', 'generateContent'],
+  },
+};
+
 // Calendar function declarations
 const listCalendarEventsDeclaration: FunctionDeclaration = {
   name: 'list_calendar_events',
@@ -262,11 +302,13 @@ export class GeminiService {
       const songKeywords = /שיר|אקורד|טאב|גיטרה|chord|song|tab|לנגן|תנגן|אקורד/i;
       const contactKeywords = /טלפון|פלאפון|מספר של|איש קשר|phone|contact|number/i;
       const calendarKeywords = /מה יש לי|יומן|אירוע|פגישה|לוח|לוז|תוסיף אירוע|תקבע פגישה|תכניס ליומן|תמחק אירוע|תבטל פגישה|תשנה אירוע|תזיז|תעדכן אירוע|calendar|events|meeting|schedule|agenda/i;
+      const sendMessageKeywords = /תשלח ל|שלח ל|תגיד ל|תודיע ל|תעביר ל|הודעה ל|send to|tell .+ that|forward to/i;
       const isSchedulingRequest = schedulingKeywords.test(userMessage);
       const isSongRequest = songKeywords.test(userMessage);
       const isContactRequest = contactKeywords.test(userMessage);
       const isCalendarRequest = calendarKeywords.test(userMessage);
-      const isFunctionCallRequest = isSchedulingRequest || isSongRequest || isContactRequest || isCalendarRequest;
+      const isSendMessageRequest = sendMessageKeywords.test(userMessage);
+      const isFunctionCallRequest = isSchedulingRequest || isSongRequest || isContactRequest || isCalendarRequest || isSendMessageRequest;
 
       const functionDeclarations: FunctionDeclaration[] = [];
       if (isSchedulingRequest) functionDeclarations.push(createScheduleDeclaration);
@@ -280,6 +322,7 @@ export class GeminiService {
           deleteCalendarEventDeclaration
         );
       }
+      if (isSendMessageRequest) functionDeclarations.push(sendMessageDeclaration);
 
       const tools = isFunctionCallRequest
         ? [{ functionDeclarations }]

@@ -6,6 +6,7 @@ import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { getCalendarLinkRepository } from '../database/repositories/calendar-link.repository.js';
 import type { WhatsAppService } from './whatsapp.service.js';
+import type { GeminiService } from './gemini.service.js';
 
 export class CalendarService {
   private calendar: calendar_v3.Calendar;
@@ -13,7 +14,7 @@ export class CalendarService {
   private reminderCronTask: ScheduledTask | null = null;
   private sentReminders = new Set<string>(); // "eventId:jid" to avoid duplicates
 
-  constructor(private whatsapp: WhatsAppService) {
+  constructor(private whatsapp: WhatsAppService, private gemini: GeminiService) {
     // Initialize Google Calendar API with service account
     const keyFile = JSON.parse(readFileSync(config.googleServiceAccountPath, 'utf-8'));
     const auth = new google.auth.GoogleAuth({
@@ -164,6 +165,12 @@ export class CalendarService {
                   ? event.description.substring(0, 200) + '...'
                   : event.description;
                 msg += `\n📝 ${desc}`;
+              }
+
+              // Generate AI brief about the meeting
+              const brief = await this.generateMeetingBrief(event);
+              if (brief) {
+                msg += `\n\n💡 ${brief}`;
               }
 
               await this.whatsapp.sendTextMessage(jid, msg);
@@ -329,6 +336,36 @@ export class CalendarService {
 
     const header = label ? `📅 אירועים ${label}:\n\n` : '';
     return `${header}${lines.join('\n')}`;
+  }
+
+  private async generateMeetingBrief(event: calendar_v3.Schema$Event): Promise<string | null> {
+    try {
+      const description = event.description?.substring(0, 500) || '';
+      const location = event.location || '';
+      const attendees = (event.attendees || [])
+        .map(a => a.displayName || a.email || '')
+        .filter(Boolean)
+        .slice(0, 10)
+        .join(', ');
+
+      // Skip if there's not enough context (just a title)
+      if (!description && !attendees && !location) {
+        return null;
+      }
+
+      const parts: string[] = [`כותרת: ${event.summary || '(ללא כותרת)'}`];
+      if (description) parts.push(`תיאור: ${description}`);
+      if (location) parts.push(`מיקום: ${location}`);
+      if (attendees) parts.push(`משתתפים: ${attendees}`);
+
+      const prompt = `אתה עוזר אישי. כתוב סיכום קצר בן 30-35 מילים בעברית על הפגישה הבאה. תן הקשר שימושי שיעזור להתכונן. אל תכתוב כותרת או הקדמה, רק את הסיכום עצמו.\n\n${parts.join('\n')}`;
+
+      const brief = await this.gemini.generateScheduledContent(prompt);
+      return brief?.trim() || null;
+    } catch (err) {
+      logger.warn('Failed to generate meeting brief:', err);
+      return null;
+    }
   }
 
   private getMeetingLink(event: calendar_v3.Schema$Event): string | null {

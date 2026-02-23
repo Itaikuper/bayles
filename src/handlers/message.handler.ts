@@ -8,13 +8,15 @@ import { CalendarService } from '../services/calendar.service.js';
 import { ScheduleRepository } from '../database/repositories/schedule.repository.js';
 import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
-import type { ScheduleArgs, CalendarListArgs, CalendarCreateArgs, CalendarUpdateArgs, CalendarDeleteArgs } from '../types/index.js';
+import type { ScheduleArgs, CalendarListArgs, CalendarCreateArgs, CalendarUpdateArgs, CalendarDeleteArgs, SendMessageArgs } from '../types/index.js';
 import { getSongRepository } from '../database/repositories/song.repository.js';
 import { getContactRepository } from '../database/repositories/contact.repository.js';
 import { getCalendarLinkRepository } from '../database/repositories/calendar-link.repository.js';
 
 export class MessageHandler {
   private voiceModeJids: Set<string> = new Set();
+  private sendMessageCooldowns: Map<string, number> = new Map();
+  private readonly SEND_MESSAGE_COOLDOWN_MS = 30_000;
 
   constructor(
     private whatsapp: WhatsAppService,
@@ -217,6 +219,10 @@ export class MessageHandler {
         }
         if (response.functionCall.name === 'delete_calendar_event') {
           await this.handleCalendarDelete(jid, response.functionCall.args as unknown as CalendarDeleteArgs, message);
+          return;
+        }
+        if (response.functionCall.name === 'send_message') {
+          await this.handleSendMessage(jid, response.functionCall.args as unknown as SendMessageArgs, message);
           return;
         }
         // Unknown function call - log and ignore
@@ -1365,6 +1371,174 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
     } catch (error) {
       logger.error('Calendar delete error:', error);
       await this.whatsapp.sendReply(jid, '❌ שגיאה במחיקת האירוע.', originalMessage);
+    }
+  }
+
+  // --- Send message to others ---
+
+  private async resolveMessageTarget(targetName: string): Promise<{ jid: string; displayName: string } | null> {
+    // 1. Phone number — normalize Israeli 05x → 9725x
+    const phoneDigits = targetName.replace(/[-\s()]/g, '');
+    if (/^\d{7,15}$/.test(phoneDigits)) {
+      let normalized = phoneDigits;
+      if (/^05\d{8}$/.test(normalized)) {
+        normalized = '972' + normalized.slice(1);
+      }
+      return { jid: `${normalized}@s.whatsapp.net`, displayName: targetName };
+    }
+
+    // 2. Contacts DB
+    const contactRepo = getContactRepository();
+    const contacts = contactRepo.search(targetName);
+    if (contacts.length > 0) {
+      const contact = contacts[0];
+      let phone = contact.phone.replace(/[-\s()]/g, '');
+      if (/^05\d{8}$/.test(phone)) {
+        phone = '972' + phone.slice(1);
+      }
+      return { jid: `${phone}@s.whatsapp.net`, displayName: contact.name };
+    }
+
+    // 3. WhatsApp groups
+    try {
+      const groups = await this.whatsapp.getGroups();
+      const normalizedTarget = targetName.toLowerCase().replace(/קבוצת\s*/i, '');
+
+      let match = groups.find(g => g.name.toLowerCase() === normalizedTarget);
+      if (!match) {
+        match = groups.find(g =>
+          g.name.toLowerCase().includes(normalizedTarget) ||
+          normalizedTarget.includes(g.name.toLowerCase())
+        );
+      }
+      if (match) {
+        return { jid: match.id, displayName: match.name };
+      }
+    } catch (err) {
+      logger.warn('Error searching groups for send_message target:', err);
+    }
+
+    // 4. Whitelisted chats (search display_name)
+    const allChats = this.botControl.getAllChats();
+    const normalizedTarget = targetName.toLowerCase();
+    const chatMatch = allChats.find(c =>
+      c.display_name?.toLowerCase().includes(normalizedTarget)
+    );
+    if (chatMatch) {
+      return { jid: chatMatch.jid, displayName: chatMatch.display_name || chatMatch.jid };
+    }
+
+    return null;
+  }
+
+  private async handleSendMessage(
+    senderJid: string,
+    args: SendMessageArgs,
+    originalMessage: proto.IWebMessageInfo
+  ): Promise<void> {
+    try {
+      // Rate limit check
+      const now = Date.now();
+      const lastSend = this.sendMessageCooldowns.get(senderJid);
+      if (lastSend && now - lastSend < this.SEND_MESSAGE_COOLDOWN_MS) {
+        const secondsLeft = Math.ceil((this.SEND_MESSAGE_COOLDOWN_MS - (now - lastSend)) / 1000);
+        await this.whatsapp.sendReply(senderJid, `⏳ נא להמתין ${secondsLeft} שניות לפני שליחת הודעה נוספת.`, originalMessage);
+        return;
+      }
+
+      // Resolve target
+      const target = await this.resolveMessageTarget(args.targetName);
+      if (!target) {
+        await this.whatsapp.sendReply(
+          senderJid,
+          `❌ לא מצאתי את "${args.targetName}". ודא ששם איש הקשר/קבוצה נכון, או נסה מספר טלפון.`,
+          originalMessage
+        );
+        return;
+      }
+
+      // Prepare content
+      let content = args.messageContent;
+      if (args.generateContent) {
+        content = await this.gemini.generateScheduledContent(
+          `כתוב הודעת WhatsApp קצרה וטבעית בעברית בנושא: ${args.messageContent}. כתוב רק את ההודעה עצמה, בלי הקדמה.`
+        );
+      }
+
+      // Check timing
+      const isScheduled = args.timing && args.timing !== 'now' && args.scheduledDate;
+
+      if (isScheduled && args.scheduledDate && args.scheduledHour !== undefined) {
+        // Scheduled send
+        const hour = Math.floor(args.scheduledHour);
+        const minute = Math.floor(args.scheduledMinute ?? 0);
+        const scheduledDate = new Date(
+          `${args.scheduledDate}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`
+        );
+
+        if (scheduledDate <= new Date()) {
+          await this.whatsapp.sendReply(senderJid, '❌ הזמן שצוין כבר עבר. נסה זמן עתידי.', originalMessage);
+          return;
+        }
+
+        const scheduleId = this.scheduler.scheduleOneTimeMessage(target.jid, content, scheduledDate, false);
+
+        // Persist to DB
+        const scheduleRepo = new ScheduleRepository();
+        scheduleRepo.create({
+          id: scheduleId,
+          jid: target.jid,
+          message: content,
+          cronExpression: 'one-time',
+          oneTime: true,
+          scheduledAt: scheduledDate.toISOString(),
+          useAi: false,
+        });
+
+        const timeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+        await this.whatsapp.sendReply(
+          senderJid,
+          `✅ *ההודעה תזומנה!*\n\n📍 ל: ${target.displayName}\n⏰ מתי: ${args.scheduledDate} ב-${timeStr}\n💬 "${content.length > 100 ? content.substring(0, 100) + '...' : content}"`,
+          originalMessage
+        );
+      } else {
+        // Immediate send
+        // Check for image tags in AI-generated content
+        const parsed = this.parseImageTags(content);
+
+        await this.whatsapp.sendTextMessage(target.jid, parsed.cleanText || content);
+
+        // Send images if any
+        if (config.autoImageGeneration && parsed.imagePrompts.length > 0) {
+          for (const { prompt, pro } of parsed.imagePrompts.slice(0, 1)) {
+            try {
+              const result = await this.gemini.generateImage(prompt, pro);
+              if (result) {
+                await this.whatsapp.sendImageBuffer(target.jid, result.image, result.text || '');
+              }
+            } catch (imgErr) {
+              logger.warn('Failed to generate image for send_message:', imgErr);
+            }
+          }
+        }
+
+        await this.whatsapp.sendReply(
+          senderJid,
+          `✅ ההודעה נשלחה ל${target.displayName}!`,
+          originalMessage
+        );
+      }
+
+      // Update cooldown
+      this.sendMessageCooldowns.set(senderJid, Date.now());
+
+    } catch (error) {
+      logger.error('Error handling send_message:', error);
+      await this.whatsapp.sendReply(
+        senderJid,
+        `❌ שגיאה בשליחת ההודעה: ${error instanceof Error ? error.message : 'שגיאה לא ידועה'}`,
+        originalMessage
+      );
     }
   }
 

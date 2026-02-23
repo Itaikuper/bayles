@@ -80,3 +80,13 @@ export interface CalendarDeleteArgs {
   searchQuery: string;
   searchDate: string;
 }
+
+export interface SendMessageArgs {
+  targetName: string;
+  messageContent: string;
+  generateContent: boolean;
+  timing?: string;
+  scheduledDate?: string;
+  scheduledHour?: number;
+  scheduledMinute?: number;
+}

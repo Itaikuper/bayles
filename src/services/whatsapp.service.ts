@@ -259,6 +259,19 @@ export class WhatsAppService {
     logger.info(`Sent image reply to ${jid}`);
   }
 
+  async sendImageBuffer(
+    jid: string,
+    imageBuffer: Buffer,
+    caption?: string
+  ): Promise<void> {
+    if (!this.sock) throw new Error('WhatsApp not connected');
+    await this.sock.sendMessage(jid, {
+      image: imageBuffer,
+      caption: caption || '',
+    });
+    logger.info(`Sent image to ${jid}`);
+  }
+
   async sendReply(
     jid: string,
     text: string,

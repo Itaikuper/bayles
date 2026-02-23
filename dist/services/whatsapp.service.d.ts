@@ -19,6 +19,7 @@ export declare class WhatsAppService {
     sendImage(jid: string, imagePath: string, caption?: string): Promise<void>;
     sendDocument(jid: string, filePath: string, fileName: string): Promise<void>;
     sendImageReply(jid: string, imageBuffer: Buffer, caption: string, quotedMessage: proto.IWebMessageInfo): Promise<void>;
+    sendImageBuffer(jid: string, imageBuffer: Buffer, caption?: string): Promise<void>;
     sendReply(jid: string, text: string, quotedMessage: proto.IWebMessageInfo): Promise<void>;
     sendVoiceReply(jid: string, audioBuffer: Buffer, quotedMessage: proto.IWebMessageInfo): Promise<void>;
     getGroups(): Promise<{

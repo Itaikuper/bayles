@@ -52,7 +52,7 @@ async function main() {
         let calendarService;
         if (existsSync(config.googleServiceAccountPath)) {
             try {
-                calendarService = new CalendarService(whatsapp);
+                calendarService = new CalendarService(whatsapp, gemini);
                 calendarService.start();
                 logger.info('CalendarService started');
             }
