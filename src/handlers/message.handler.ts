@@ -1379,7 +1379,7 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
 
   private async resolveMessageTarget(targetName: string): Promise<{ jid: string; displayName: string } | null> {
     // 1. Phone number — normalize Israeli 05x → 9725x
-    const phoneDigits = targetName.replace(/[-\s()]/g, '');
+    const phoneDigits = targetName.replace(/[-\s()+]/g, '');
     if (/^\d{7,15}$/.test(phoneDigits)) {
       let normalized = phoneDigits;
       if (/^05\d{8}$/.test(normalized)) {
