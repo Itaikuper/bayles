@@ -295,6 +295,11 @@ export class GeminiService {
       const today = new Date();
       const dateContext = `Today is ${today.toISOString().split('T')[0]} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][today.getDay()]}).`;
 
+      // Capability context so the model knows what it can do and trusts action records
+      const capabilityContext = `
+You have real capabilities through function calling: send messages to other people (send_message), schedule messages (create_schedule), search songs (search_song), search contacts (search_contact), and manage calendar events.
+Messages in [brackets] in conversation history are factual records of actions you performed. Trust them completely — if it says [שלחתי הודעה ל...], you DID send that message. Never deny or contradict these records.`;
+
       // Only enable function calling when message matches known patterns
       // Otherwise use googleSearch for regular queries (weather, current events, etc.)
       // Note: googleSearch and functionDeclarations DON'T work together (known SDK bug)
@@ -302,7 +307,7 @@ export class GeminiService {
       const songKeywords = /שיר|אקורד|טאב|גיטרה|chord|song|tab|לנגן|תנגן|אקורד/i;
       const contactKeywords = /טלפון|פלאפון|מספר של|איש קשר|phone|contact|number/i;
       const calendarKeywords = /מה יש לי|יומן|אירוע|פגישה|לוח|לוז|תוסיף אירוע|תקבע פגישה|תכניס ליומן|תמחק אירוע|תבטל פגישה|תשנה אירוע|תזיז|תעדכן אירוע|calendar|events|meeting|schedule|agenda/i;
-      const sendMessageKeywords = /תשלח ל|שלח ל|לשלוח ל|לשלוח הודעה|תגיד ל|תודיע ל|תעביר ל|הודעה ל|send to|tell .+ that|forward to/i;
+      const sendMessageKeywords = /תשלח ל|שלח ל|שלח .{1,30} ל|לשלוח ל|לשלוח .{1,30} ל|לשלוח הודעה|תגיד ל|תודיע ל|תעביר ל|הודעה ל|send to|send .{1,30} to|tell .+ that|forward to|למספר \d/i;
       const isSchedulingRequest = schedulingKeywords.test(userMessage);
       const isSongRequest = songKeywords.test(userMessage);
       const isContactRequest = contactKeywords.test(userMessage);
@@ -337,7 +342,7 @@ export class GeminiService {
           // Add system instruction as first message pair
           {
             role: 'user',
-            parts: [{ text: `System instruction: ${systemPrompt}\n\n${dateContext}` }],
+            parts: [{ text: `System instruction: ${systemPrompt}\n\n${dateContext}${capabilityContext}` }],
           },
           {
             role: 'model',
