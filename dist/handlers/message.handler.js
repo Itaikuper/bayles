@@ -179,7 +179,8 @@ export class MessageHandler {
                     return;
                 }
                 if (response.functionCall.name === 'send_message') {
-                    await this.handleSendMessage(jid, response.functionCall.args, message);
+                    const senderName = message.pushName || this.botControl.getChatConfig(jid)?.display_name || 'מישהו';
+                    await this.handleSendMessage(jid, response.functionCall.args, message, senderName);
                     return;
                 }
                 // Unknown function call - log and ignore
@@ -1005,7 +1006,7 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
         }
         return null;
     }
-    async handleSendMessage(senderJid, args, originalMessage) {
+    async handleSendMessage(senderJid, args, originalMessage, senderName) {
         try {
             // Rate limit check
             const now = Date.now();
@@ -1026,6 +1027,8 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
             if (args.generateContent) {
                 content = await this.gemini.generateScheduledContent(`כתוב הודעת WhatsApp קצרה וטבעית בעברית בנושא: ${args.messageContent}. כתוב רק את ההודעה עצמה, בלי הקדמה.`);
             }
+            // Format with sender attribution so recipient knows who sent it
+            const outgoingMessage = `📩 *${senderName}* שלח/ה לך הודעה:\n\n${content}`;
             // Check timing
             const isScheduled = args.timing && args.timing !== 'now' && args.scheduledDate;
             if (isScheduled && args.scheduledDate && args.scheduledHour !== undefined) {
@@ -1037,13 +1040,13 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
                     await this.whatsapp.sendReply(senderJid, '❌ הזמן שצוין כבר עבר. נסה זמן עתידי.', originalMessage);
                     return;
                 }
-                const scheduleId = this.scheduler.scheduleOneTimeMessage(target.jid, content, scheduledDate, false);
+                const scheduleId = this.scheduler.scheduleOneTimeMessage(target.jid, outgoingMessage, scheduledDate, false);
                 // Persist to DB
                 const scheduleRepo = new ScheduleRepository();
                 scheduleRepo.create({
                     id: scheduleId,
                     jid: target.jid,
-                    message: content,
+                    message: outgoingMessage,
                     cronExpression: 'one-time',
                     oneTime: true,
                     scheduledAt: scheduledDate.toISOString(),
@@ -1055,8 +1058,8 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
             else {
                 // Immediate send
                 // Check for image tags in AI-generated content
-                const parsed = this.parseImageTags(content);
-                await this.whatsapp.sendTextMessage(target.jid, parsed.cleanText || content);
+                const parsed = this.parseImageTags(outgoingMessage);
+                await this.whatsapp.sendTextMessage(target.jid, parsed.cleanText || outgoingMessage);
                 // Send images if any
                 if (config.autoImageGeneration && parsed.imagePrompts.length > 0) {
                     for (const { prompt, pro } of parsed.imagePrompts.slice(0, 1)) {

@@ -222,7 +222,8 @@ export class MessageHandler {
           return;
         }
         if (response.functionCall.name === 'send_message') {
-          await this.handleSendMessage(jid, response.functionCall.args as unknown as SendMessageArgs, message);
+          const senderName = message.pushName || this.botControl.getChatConfig(jid)?.display_name || 'מישהו';
+          await this.handleSendMessage(jid, response.functionCall.args as unknown as SendMessageArgs, message, senderName);
           return;
         }
         // Unknown function call - log and ignore
@@ -1434,7 +1435,8 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
   private async handleSendMessage(
     senderJid: string,
     args: SendMessageArgs,
-    originalMessage: proto.IWebMessageInfo
+    originalMessage: proto.IWebMessageInfo,
+    senderName: string
   ): Promise<void> {
     try {
       // Rate limit check
@@ -1465,6 +1467,9 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
         );
       }
 
+      // Format with sender attribution so recipient knows who sent it
+      const outgoingMessage = `📩 *${senderName}* שלח/ה לך הודעה:\n\n${content}`;
+
       // Check timing
       const isScheduled = args.timing && args.timing !== 'now' && args.scheduledDate;
 
@@ -1481,14 +1486,14 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
           return;
         }
 
-        const scheduleId = this.scheduler.scheduleOneTimeMessage(target.jid, content, scheduledDate, false);
+        const scheduleId = this.scheduler.scheduleOneTimeMessage(target.jid, outgoingMessage, scheduledDate, false);
 
         // Persist to DB
         const scheduleRepo = new ScheduleRepository();
         scheduleRepo.create({
           id: scheduleId,
           jid: target.jid,
-          message: content,
+          message: outgoingMessage,
           cronExpression: 'one-time',
           oneTime: true,
           scheduledAt: scheduledDate.toISOString(),
@@ -1504,9 +1509,9 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
       } else {
         // Immediate send
         // Check for image tags in AI-generated content
-        const parsed = this.parseImageTags(content);
+        const parsed = this.parseImageTags(outgoingMessage);
 
-        await this.whatsapp.sendTextMessage(target.jid, parsed.cleanText || content);
+        await this.whatsapp.sendTextMessage(target.jid, parsed.cleanText || outgoingMessage);
 
         // Send images if any
         if (config.autoImageGeneration && parsed.imagePrompts.length > 0) {
