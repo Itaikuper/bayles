@@ -348,17 +348,12 @@ export class CalendarService {
         .slice(0, 10)
         .join(', ');
 
-      // Skip if there's not enough context (just a title)
-      if (!description && !attendees && !location) {
-        return null;
-      }
-
       const parts: string[] = [`כותרת: ${event.summary || '(ללא כותרת)'}`];
       if (description) parts.push(`תיאור: ${description}`);
       if (location) parts.push(`מיקום: ${location}`);
       if (attendees) parts.push(`משתתפים: ${attendees}`);
 
-      const prompt = `אתה עוזר אישי. כתוב סיכום קצר בן 30-35 מילים בעברית על הפגישה הבאה. תן הקשר שימושי שיעזור להתכונן. אל תכתוב כותרת או הקדמה, רק את הסיכום עצמו.\n\n${parts.join('\n')}`;
+      const prompt = `אתה עוזר אישי. כתוב סיכום קצר בן 30-35 מילים בעברית על הפגישה הבאה. תן הקשר שימושי שיעזור להתכונן. אם יש רק כותרת, הסק מהכותרת מה הפגישה עשויה לכלול ותן טיפים להכנה. אל תכתוב כותרת או הקדמה, רק את הסיכום עצמו.\n\n${parts.join('\n')}`;
 
       const brief = await this.gemini.generateScheduledContent(prompt);
       return brief?.trim() || null;
