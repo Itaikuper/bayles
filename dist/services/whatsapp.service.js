@@ -188,8 +188,9 @@ export class WhatsAppService {
     async sendTextMessage(jid, text) {
         if (!this.sock)
             throw new Error('WhatsApp not connected');
-        await this.sock.sendMessage(jid, { text });
+        const sent = await this.sock.sendMessage(jid, { text });
         logger.info(`Sent message to ${jid}`);
+        return sent?.key;
     }
     async sendImage(jid, imagePath, caption) {
         if (!this.sock)

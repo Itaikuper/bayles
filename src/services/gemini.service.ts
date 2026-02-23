@@ -823,6 +823,28 @@ Respond with ONLY the JSON array, nothing else.`;
     return history;
   }
 
+  /**
+   * Add a user message + bot action summary to conversation history.
+   * Used after function calls (send_message, create_schedule, etc.) so the bot
+   * remembers what it did when the user asks later.
+   */
+  addToHistory(jid: string, userMessage: string, actionSummary: string, tenantId: string = 'default'): void {
+    const historyKey = `${tenantId}:${jid}`;
+    const history = this.conversationHistory.get(historyKey) ?? this.loadHistoryFromDb(historyKey, jid, tenantId);
+
+    history.push(
+      { role: 'user', parts: [{ text: userMessage }] },
+      { role: 'model', parts: [{ text: actionSummary }] }
+    );
+
+    while (history.length > this.maxHistoryLength * 2) {
+      history.shift();
+    }
+
+    this.conversationHistory.set(historyKey, history);
+    getConversationHistoryRepository().addExchange(jid, userMessage, actionSummary, tenantId);
+  }
+
   clearHistory(jid: string, tenantId: string = 'default'): void {
     const historyKey = `${tenantId}:${jid}`;
     this.conversationHistory.delete(historyKey);

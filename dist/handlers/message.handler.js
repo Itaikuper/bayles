@@ -14,6 +14,8 @@ export class MessageHandler {
     voiceModeJids = new Set();
     sendMessageCooldowns = new Map();
     SEND_MESSAGE_COOLDOWN_MS = 30_000;
+    mediationMessages = new Map();
+    MEDIATION_TTL_MS = 60 * 60 * 1000; // 1 hour
     constructor(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService) {
         this.whatsapp = whatsapp;
         this.gemini = gemini;
@@ -39,6 +41,10 @@ export class MessageHandler {
         const msg = message.message;
         const msgTypes = msg ? Object.keys(msg).filter(k => msg[k] != null) : [];
         logger.info(`DEBUG msgTypes: ${JSON.stringify(msgTypes)} from ${message.key.participant || jid}`);
+        // Check for mediation reply (before bot-control — recipient may not be whitelisted)
+        const mediationHandled = await this.checkAndHandleMediation(message, jid);
+        if (mediationHandled)
+            return;
         // Handle voice/audio messages
         const audioMessage = message.message?.audioMessage;
         if (audioMessage) {
@@ -147,44 +153,44 @@ export class MessageHandler {
             const response = await this.gemini.generateResponse(jid, messageForAI, decision.customPrompt, 'default', sender || undefined);
             // Handle function calls (e.g., scheduling)
             if (response.type === 'function_call' && response.functionCall) {
+                let actionSummary = null;
                 if (response.functionCall.name === 'create_schedule') {
                     const scheduleArgs = response.functionCall.args;
-                    await this.handleScheduleFunctionCall(jid, scheduleArgs, message);
-                    return;
+                    actionSummary = await this.handleScheduleFunctionCall(jid, scheduleArgs, message);
                 }
-                if (response.functionCall.name === 'search_song') {
+                else if (response.functionCall.name === 'search_song') {
                     const args = response.functionCall.args;
-                    await this.handleSongSearch(jid, args.query, message);
-                    return;
+                    actionSummary = await this.handleSongSearch(jid, args.query, message);
                 }
-                if (response.functionCall.name === 'search_contact') {
+                else if (response.functionCall.name === 'search_contact') {
                     const args = response.functionCall.args;
-                    await this.handleContactSearch(jid, args.query, message);
-                    return;
+                    actionSummary = await this.handleContactSearch(jid, args.query, message);
                 }
-                if (response.functionCall.name === 'list_calendar_events') {
-                    await this.handleCalendarList(jid, response.functionCall.args, message);
-                    return;
+                else if (response.functionCall.name === 'list_calendar_events') {
+                    actionSummary = await this.handleCalendarList(jid, response.functionCall.args, message);
                 }
-                if (response.functionCall.name === 'create_calendar_event') {
-                    await this.handleCalendarCreate(jid, response.functionCall.args, message);
-                    return;
+                else if (response.functionCall.name === 'create_calendar_event') {
+                    actionSummary = await this.handleCalendarCreate(jid, response.functionCall.args, message);
                 }
-                if (response.functionCall.name === 'update_calendar_event') {
-                    await this.handleCalendarUpdate(jid, response.functionCall.args, message);
-                    return;
+                else if (response.functionCall.name === 'update_calendar_event') {
+                    actionSummary = await this.handleCalendarUpdate(jid, response.functionCall.args, message);
                 }
-                if (response.functionCall.name === 'delete_calendar_event') {
-                    await this.handleCalendarDelete(jid, response.functionCall.args, message);
-                    return;
+                else if (response.functionCall.name === 'delete_calendar_event') {
+                    actionSummary = await this.handleCalendarDelete(jid, response.functionCall.args, message);
                 }
-                if (response.functionCall.name === 'send_message') {
+                else if (response.functionCall.name === 'send_message') {
                     const senderName = message.pushName || this.botControl.getChatConfig(jid)?.display_name || 'מישהו';
-                    await this.handleSendMessage(jid, response.functionCall.args, message, senderName);
-                    return;
+                    actionSummary = await this.handleSendMessage(jid, response.functionCall.args, message, senderName);
                 }
-                // Unknown function call - log and ignore
-                logger.warn(`Unknown function call: ${response.functionCall.name}`);
+                else {
+                    // Unknown function call - log and ignore
+                    logger.warn(`Unknown function call: ${response.functionCall.name}`);
+                }
+                // Save the user's request and bot's action to conversation history
+                if (actionSummary) {
+                    this.gemini.addToHistory(jid, messageForAI, actionSummary);
+                }
+                return;
             }
             // Handle regular text response
             if (response.text) {
@@ -557,7 +563,7 @@ export class MessageHandler {
             minute = Math.floor(minute);
             if (isNaN(hour) || isNaN(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
                 await this.whatsapp.sendReply(jid, '❌ שעה לא תקינה. נסה פורמט כמו: 14:30 או 9 בבוקר', originalMessage);
-                return;
+                return `[ניסיתי לתזמן הודעה אבל השעה לא תקינה: ${args.hour}:${args.minute}]`;
             }
             logger.info(`Normalized time: ${hour}:${minute} (original: hour=${args.hour}, minute=${args.minute})`);
             // Resolve target - find group by name or use current chat
@@ -586,7 +592,7 @@ export class MessageHandler {
                 const scheduledDate = new Date(`${args.oneTimeDate}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`);
                 if (scheduledDate <= new Date()) {
                     await this.whatsapp.sendReply(jid, '❌ התאריך כבר עבר. נסה תאריך עתידי.', originalMessage);
-                    return;
+                    return `[ניסיתי לתזמן הודעה אבל התאריך כבר עבר: ${args.oneTimeDate}]`;
                 }
                 scheduleId = this.scheduler.scheduleOneTimeMessage(targetJid, args.message, scheduledDate, args.useAi);
                 scheduleDescription = `${args.oneTimeDate} ב-${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
@@ -603,7 +609,7 @@ export class MessageHandler {
             }
             else {
                 await this.whatsapp.sendReply(jid, '❌ לא הצלחתי להבין מתי לשלוח. נסה לציין ימים או תאריך.', originalMessage);
-                return;
+                return `[ניסיתי לתזמן הודעה אבל לא הצלחתי להבין מתי לשלוח]`;
             }
             // Build confirmation message
             const targetText = targetJid === jid ? 'כאן' : targetName;
@@ -617,10 +623,12 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
 🔑 ID: ${scheduleId}`;
             await this.whatsapp.sendReply(jid, confirmation, originalMessage);
             logger.info(`Natural language schedule created: ${scheduleId} for ${targetJid}`);
+            return confirmation;
         }
         catch (error) {
             logger.error('Error creating schedule from function call:', error);
             await this.whatsapp.sendReply(jid, `❌ שגיאה ביצירת התזמון: ${error instanceof Error ? error.message : 'שגיאה לא ידועה'}`, originalMessage);
+            return `[ניסיתי לתזמן הודעה אבל נכשלתי: ${error instanceof Error ? error.message : 'שגיאה'}]`;
         }
     }
     /**
@@ -631,7 +639,7 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
         const results = songRepo.search(query, 10);
         if (results.length === 0) {
             await this.whatsapp.sendReply(jid, `לא נמצאו שירים עבור "${query}". נסה חיפוש אחר.`, originalMessage);
-            return;
+            return `[חיפשתי שיר "${query}" ולא מצאתי תוצאות]`;
         }
         if (results.length === 1) {
             const song = results[0];
@@ -640,10 +648,12 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
                 text += `\nCapo: ${song.capo}`;
             text += `\n\n${song.url}`;
             await this.whatsapp.sendReply(jid, text, originalMessage);
-            return;
+            return `[חיפשתי שיר "${query}" ומצאתי: ${song.title} - ${song.artist}]`;
         }
         const list = results.map((s, i) => `${i + 1}. *${s.title}* - ${s.artist}\n${s.url}`).join('\n\n');
         await this.whatsapp.sendReply(jid, `🎸 נמצאו ${results.length} שירים:\n\n${list}`, originalMessage);
+        const titles = results.map(s => `${s.title} - ${s.artist}`).join(', ');
+        return `[חיפשתי שיר "${query}" ומצאתי ${results.length} תוצאות: ${titles}]`;
     }
     /**
      * Handle contact search via Gemini function calling
@@ -653,7 +663,7 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
         const results = contactRepo.search(query);
         if (results.length === 0) {
             await this.whatsapp.sendReply(jid, `לא נמצאו אנשי קשר עם השם "${query}".`, originalMessage);
-            return;
+            return `[חיפשתי איש קשר "${query}" ולא מצאתי תוצאות]`;
         }
         const list = results.map((c, i) => {
             let line = `${i + 1}. *${c.name}*: ${c.phone}`;
@@ -662,6 +672,8 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
             return line;
         }).join('\n');
         await this.whatsapp.sendReply(jid, `📞 נמצאו ${results.length} אנשי קשר:\n\n${list}`, originalMessage);
+        const names = results.map(c => c.name).join(', ');
+        return `[חיפשתי איש קשר "${query}" ומצאתי: ${names}]`;
     }
     /**
      * Resolve target name to JID - search in bot's groups or use current chat
@@ -814,13 +826,13 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
     async handleCalendarList(jid, args, originalMessage) {
         if (!this.calendarService) {
             await this.whatsapp.sendReply(jid, '❌ שירות היומן לא מוגדר.', originalMessage);
-            return;
+            return `[ניסיתי להציג אירועי יומן אבל שירות היומן לא מוגדר]`;
         }
         const repo = getCalendarLinkRepository();
         const links = repo.findByJid(jid);
         if (links.length === 0) {
             await this.whatsapp.sendReply(jid, '❌ אין לך יומן מקושר. בקש מהמנהל לקשר את היומן שלך.', originalMessage);
-            return;
+            return `[ניסיתי להציג אירועי יומן אבל אין יומן מקושר]`;
         }
         try {
             const startDate = args.startDate ? new Date(args.startDate) : new Date();
@@ -843,22 +855,25 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
             }
             const formatted = this.calendarService.formatEventList(events, label);
             await this.whatsapp.sendReply(jid, formatted, originalMessage);
+            const eventNames = events.map(e => e.summary || 'ללא שם').join(', ');
+            return `[הצגתי אירועי יומן ${label}: ${events.length} אירועים${events.length > 0 ? ' - ' + eventNames : ''}]`;
         }
         catch (error) {
             logger.error('Calendar list error:', error);
             await this.whatsapp.sendReply(jid, '❌ שגיאה בשליפת אירועים מהיומן.', originalMessage);
+            return `[ניסיתי להציג אירועי יומן אבל נכשלתי]`;
         }
     }
     async handleCalendarCreate(jid, args, originalMessage) {
         if (!this.calendarService) {
             await this.whatsapp.sendReply(jid, '❌ שירות היומן לא מוגדר.', originalMessage);
-            return;
+            return `[ניסיתי ליצור אירוע ביומן אבל שירות היומן לא מוגדר]`;
         }
         const repo = getCalendarLinkRepository();
         const defaultLink = repo.findDefaultByJid(jid);
         if (!defaultLink) {
             await this.whatsapp.sendReply(jid, '❌ אין לך יומן מקושר. בקש מהמנהל לקשר את היומן שלך.', originalMessage);
-            return;
+            return `[ניסיתי ליצור אירוע ביומן אבל אין יומן מקושר]`;
         }
         try {
             const hour = Math.floor(args.startHour);
@@ -869,33 +884,35 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
             const event = await this.calendarService.createEventForJid(jid, args.summary, startTime, endTime);
             if (!event) {
                 await this.whatsapp.sendReply(jid, '❌ לא הצלחתי ליצור את האירוע.', originalMessage);
-                return;
+                return `[ניסיתי ליצור אירוע "${args.summary}" ביומן אבל נכשלתי]`;
             }
             const timeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
             await this.whatsapp.sendReply(jid, `✅ *אירוע נוצר!*\n\n📌 ${args.summary}\n📅 ${args.date}\n🕐 ${timeStr} (${duration} דקות)`, originalMessage);
+            return `[יצרתי אירוע ביומן: "${args.summary}" בתאריך ${args.date} בשעה ${timeStr}]`;
         }
         catch (error) {
             logger.error('Calendar create error:', error);
             await this.whatsapp.sendReply(jid, '❌ שגיאה ביצירת אירוע ביומן.', originalMessage);
+            return `[ניסיתי ליצור אירוע "${args.summary}" ביומן אבל נכשלתי]`;
         }
     }
     async handleCalendarUpdate(jid, args, originalMessage) {
         if (!this.calendarService) {
             await this.whatsapp.sendReply(jid, '❌ שירות היומן לא מוגדר.', originalMessage);
-            return;
+            return `[ניסיתי לעדכן אירוע ביומן אבל שירות היומן לא מוגדר]`;
         }
         const repo = getCalendarLinkRepository();
         const links = repo.findByJid(jid);
         if (links.length === 0) {
             await this.whatsapp.sendReply(jid, '❌ אין לך יומן מקושר.', originalMessage);
-            return;
+            return `[ניסיתי לעדכן אירוע ביומן אבל אין יומן מקושר]`;
         }
         try {
             const searchDate = new Date(args.searchDate);
             const found = await this.calendarService.searchEventForJid(jid, args.searchQuery, searchDate);
             if (!found) {
                 await this.whatsapp.sendReply(jid, `❌ לא מצאתי אירוע "${args.searchQuery}" בתאריך ${args.searchDate}.`, originalMessage);
-                return;
+                return `[ניסיתי לעדכן אירוע "${args.searchQuery}" אבל לא מצאתי אותו]`;
             }
             const updates = {};
             if (args.newSummary)
@@ -927,36 +944,41 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
                 changes.push(`🕐 שעה: ${String(args.newStartHour).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
             }
             await this.whatsapp.sendReply(jid, `✅ *אירוע עודכן!*\n\nאירוע: "${found.event.summary}"\n${changes.join('\n')}`, originalMessage);
+            const changeDesc = changes.map(c => c.replace(/^[^\s]+\s/, '')).join(', ');
+            return `[עדכנתי אירוע "${found.event.summary}": ${changeDesc}]`;
         }
         catch (error) {
             logger.error('Calendar update error:', error);
             await this.whatsapp.sendReply(jid, '❌ שגיאה בעדכון האירוע.', originalMessage);
+            return `[ניסיתי לעדכן אירוע "${args.searchQuery}" אבל נכשלתי]`;
         }
     }
     async handleCalendarDelete(jid, args, originalMessage) {
         if (!this.calendarService) {
             await this.whatsapp.sendReply(jid, '❌ שירות היומן לא מוגדר.', originalMessage);
-            return;
+            return `[ניסיתי למחוק אירוע מהיומן אבל שירות היומן לא מוגדר]`;
         }
         const repo = getCalendarLinkRepository();
         const links = repo.findByJid(jid);
         if (links.length === 0) {
             await this.whatsapp.sendReply(jid, '❌ אין לך יומן מקושר.', originalMessage);
-            return;
+            return `[ניסיתי למחוק אירוע מהיומן אבל אין יומן מקושר]`;
         }
         try {
             const searchDate = new Date(args.searchDate);
             const found = await this.calendarService.searchEventForJid(jid, args.searchQuery, searchDate);
             if (!found) {
                 await this.whatsapp.sendReply(jid, `❌ לא מצאתי אירוע "${args.searchQuery}" בתאריך ${args.searchDate}.`, originalMessage);
-                return;
+                return `[ניסיתי למחוק אירוע "${args.searchQuery}" אבל לא מצאתי אותו]`;
             }
             await this.calendarService.deleteEvent(found.calendarId, found.event.id);
             await this.whatsapp.sendReply(jid, `🗑️ *אירוע נמחק!*\n\n"${found.event.summary}" בתאריך ${args.searchDate}`, originalMessage);
+            return `[מחקתי אירוע מהיומן: "${found.event.summary}" בתאריך ${args.searchDate}]`;
         }
         catch (error) {
             logger.error('Calendar delete error:', error);
             await this.whatsapp.sendReply(jid, '❌ שגיאה במחיקת האירוע.', originalMessage);
+            return `[ניסיתי למחוק אירוע "${args.searchQuery}" אבל נכשלתי]`;
         }
     }
     // --- Send message to others ---
@@ -1014,21 +1036,21 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
             if (lastSend && now - lastSend < this.SEND_MESSAGE_COOLDOWN_MS) {
                 const secondsLeft = Math.ceil((this.SEND_MESSAGE_COOLDOWN_MS - (now - lastSend)) / 1000);
                 await this.whatsapp.sendReply(senderJid, `⏳ נא להמתין ${secondsLeft} שניות לפני שליחת הודעה נוספת.`, originalMessage);
-                return;
+                return `[ניסיתי לשלוח הודעה ל"${args.targetName}" אבל יש cooldown]`;
             }
             // Resolve target
             const target = await this.resolveMessageTarget(args.targetName);
             if (!target) {
                 await this.whatsapp.sendReply(senderJid, `❌ לא מצאתי את "${args.targetName}". ודא ששם איש הקשר/קבוצה נכון, או נסה מספר טלפון.`, originalMessage);
-                return;
+                return `[ניסיתי לשלוח הודעה ל"${args.targetName}" אבל לא מצאתי את הנמען]`;
             }
             // Prepare content
             let content = args.messageContent;
             if (args.generateContent) {
                 content = await this.gemini.generateScheduledContent(`כתוב הודעת WhatsApp קצרה וטבעית בעברית בנושא: ${args.messageContent}. כתוב רק את ההודעה עצמה, בלי הקדמה.`);
             }
-            // Format with sender attribution so recipient knows who sent it
-            const outgoingMessage = `📩 *${senderName}* שלח/ה לך הודעה:\n\n${content}`;
+            // Format with sender attribution and reply instruction
+            const outgoingMessage = `📩 *${senderName}* שלח/ה לך הודעה:\n\n${content}\n\n↩️ _השב/י על הודעה זו כדי לשלוח תשובה_`;
             // Check timing
             const isScheduled = args.timing && args.timing !== 'now' && args.scheduledDate;
             if (isScheduled && args.scheduledDate && args.scheduledHour !== undefined) {
@@ -1038,7 +1060,7 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
                 const scheduledDate = new Date(`${args.scheduledDate}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`);
                 if (scheduledDate <= new Date()) {
                     await this.whatsapp.sendReply(senderJid, '❌ הזמן שצוין כבר עבר. נסה זמן עתידי.', originalMessage);
-                    return;
+                    return `[ניסיתי לתזמן הודעה ל"${target.displayName}" אבל הזמן כבר עבר]`;
                 }
                 const scheduleId = this.scheduler.scheduleOneTimeMessage(target.jid, outgoingMessage, scheduledDate, false);
                 // Persist to DB
@@ -1054,12 +1076,15 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
                 });
                 const timeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
                 await this.whatsapp.sendReply(senderJid, `✅ *ההודעה תזומנה!*\n\n📍 ל: ${target.displayName}\n⏰ מתי: ${args.scheduledDate} ב-${timeStr}\n💬 "${content.length > 100 ? content.substring(0, 100) + '...' : content}"`, originalMessage);
+                // Update cooldown
+                this.sendMessageCooldowns.set(senderJid, Date.now());
+                return `[תזמנתי הודעה ל${target.displayName} בתאריך ${args.scheduledDate} בשעה ${timeStr}. תוכן ההודעה: "${content}"]`;
             }
             else {
                 // Immediate send
                 // Check for image tags in AI-generated content
                 const parsed = this.parseImageTags(outgoingMessage);
-                await this.whatsapp.sendTextMessage(target.jid, parsed.cleanText || outgoingMessage);
+                const sentKey = await this.whatsapp.sendTextMessage(target.jid, parsed.cleanText || outgoingMessage);
                 // Send images if any
                 if (config.autoImageGeneration && parsed.imagePrompts.length > 0) {
                     for (const { prompt, pro } of parsed.imagePrompts.slice(0, 1)) {
@@ -1074,15 +1099,95 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
                         }
                     }
                 }
-                await this.whatsapp.sendReply(senderJid, `✅ ההודעה נשלחה ל${target.displayName}!`, originalMessage);
+                // Register mediation session so recipient can reply
+                if (sentKey?.id) {
+                    const session = {
+                        initiatorJid: senderJid,
+                        initiatorName: senderName,
+                        recipientJid: target.jid,
+                        recipientName: target.displayName,
+                        lastActivity: Date.now(),
+                    };
+                    this.mediationMessages.set(sentKey.id, { session, sentToJid: target.jid });
+                    logger.info(`[mediation] Registered stanzaId=${sentKey.id} for ${senderName} → ${target.displayName}`);
+                }
+                await this.whatsapp.sendReply(senderJid, `✅ ההודעה נשלחה ל${target.displayName}!\n_${target.displayName} יכול/ה להשיב, ואעביר לך את התשובה._`, originalMessage);
+                // Update cooldown
+                this.sendMessageCooldowns.set(senderJid, Date.now());
+                return `[שלחתי הודעה ל${target.displayName}. תוכן ההודעה: "${content}"]`;
             }
-            // Update cooldown
-            this.sendMessageCooldowns.set(senderJid, Date.now());
         }
         catch (error) {
             logger.error('Error handling send_message:', error);
             await this.whatsapp.sendReply(senderJid, `❌ שגיאה בשליחת ההודעה: ${error instanceof Error ? error.message : 'שגיאה לא ידועה'}`, originalMessage);
+            return `[ניסיתי לשלוח הודעה ל"${args.targetName}" אבל נכשלתי: ${error instanceof Error ? error.message : 'שגיאה'}]`;
         }
+    }
+    // --- Mediation (reply forwarding) ---
+    cleanExpiredMediations() {
+        const now = Date.now();
+        for (const [stanzaId, entry] of this.mediationMessages) {
+            if (now - entry.session.lastActivity > this.MEDIATION_TTL_MS) {
+                this.mediationMessages.delete(stanzaId);
+            }
+        }
+    }
+    async checkAndHandleMediation(message, jid) {
+        this.cleanExpiredMediations();
+        // Extract stanzaId from quoted message (check all message types that carry contextInfo)
+        const contextInfo = message.message?.extendedTextMessage?.contextInfo
+            || message.message?.audioMessage?.contextInfo
+            || message.message?.imageMessage?.contextInfo
+            || message.message?.documentMessage?.contextInfo;
+        const stanzaId = contextInfo?.stanzaId;
+        if (!stanzaId)
+            return false;
+        const entry = this.mediationMessages.get(stanzaId);
+        if (!entry)
+            return false;
+        // Verify the replier is the person this message was sent to
+        const replierJid = jid;
+        if (replierJid !== entry.sentToJid)
+            return false;
+        // Extract reply text (text-only for v1)
+        const replyText = message.message?.conversation
+            || message.message?.extendedTextMessage?.text;
+        if (!replyText) {
+            logger.info(`[mediation] Non-text reply from ${replierJid} — ignoring`);
+            return true; // consumed but not forwarded
+        }
+        const { session } = entry;
+        // Determine forward target and sender name
+        let forwardToJid;
+        let senderName;
+        if (entry.sentToJid === session.initiatorJid) {
+            // Initiator is replying → forward to recipient
+            forwardToJid = session.recipientJid;
+            senderName = session.initiatorName;
+        }
+        else {
+            // Recipient is replying → forward to initiator
+            forwardToJid = session.initiatorJid;
+            senderName = session.recipientName;
+        }
+        // Use pushName if available for more accurate name
+        if (message.pushName) {
+            senderName = message.pushName;
+        }
+        const forwardMessage = `💬 *${senderName}*:\n${replyText}\n\n↩️ _השב/י על הודעה זו כדי להמשיך את השיחה_`;
+        try {
+            const sentKey = await this.whatsapp.sendTextMessage(forwardToJid, forwardMessage);
+            // Register new stanzaId to continue the chain
+            if (sentKey?.id) {
+                session.lastActivity = Date.now();
+                this.mediationMessages.set(sentKey.id, { session, sentToJid: forwardToJid });
+                logger.info(`[mediation] Forwarded reply from ${senderName} → ${forwardToJid}, new stanzaId=${sentKey.id}`);
+            }
+        }
+        catch (error) {
+            logger.error('[mediation] Failed to forward reply:', error);
+        }
+        return true;
     }
     extractImagePrompt(text) {
         const lower = text.toLowerCase();

@@ -79,3 +79,10 @@ export interface SendMessageArgs {
     scheduledHour?: number;
     scheduledMinute?: number;
 }
+export interface MediationSession {
+    initiatorJid: string;
+    initiatorName: string;
+    recipientJid: string;
+    recipientName: string;
+    lastActivity: number;
+}

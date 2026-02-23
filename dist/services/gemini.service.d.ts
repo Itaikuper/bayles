@@ -30,6 +30,12 @@ export declare class GeminiService {
      * Converts DB rows into the ChatHistory format used by the in-memory cache.
      */
     private loadHistoryFromDb;
+    /**
+     * Add a user message + bot action summary to conversation history.
+     * Used after function calls (send_message, create_schedule, etc.) so the bot
+     * remembers what it did when the user asks later.
+     */
+    addToHistory(jid: string, userMessage: string, actionSummary: string, tenantId?: string): void;
     clearHistory(jid: string, tenantId?: string): void;
     clearAllHistory(): void;
     listConversations(): {

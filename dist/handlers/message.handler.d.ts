@@ -15,6 +15,8 @@ export declare class MessageHandler {
     private voiceModeJids;
     private sendMessageCooldowns;
     private readonly SEND_MESSAGE_COOLDOWN_MS;
+    private mediationMessages;
+    private readonly MEDIATION_TTL_MS;
     constructor(whatsapp: WhatsAppService, gemini: GeminiService, scheduler: SchedulerService, botControl: BotControlService, birthdayService: BirthdayService, calendarService?: CalendarService | undefined);
     handle(message: proto.IWebMessageInfo): Promise<void>;
     private extractText;
@@ -66,6 +68,8 @@ export declare class MessageHandler {
     private handleCalendarDelete;
     private resolveMessageTarget;
     private handleSendMessage;
+    private cleanExpiredMediations;
+    private checkAndHandleMediation;
     private extractImagePrompt;
     private handleImageGeneration;
     private getHelpText;

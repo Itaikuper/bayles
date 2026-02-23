@@ -211,10 +211,11 @@ export class WhatsAppService {
     this.messageHandler = handler;
   }
 
-  async sendTextMessage(jid: string, text: string): Promise<void> {
+  async sendTextMessage(jid: string, text: string): Promise<proto.IMessageKey | undefined> {
     if (!this.sock) throw new Error('WhatsApp not connected');
-    await this.sock.sendMessage(jid, { text });
+    const sent = await this.sock.sendMessage(jid, { text });
     logger.info(`Sent message to ${jid}`);
+    return sent?.key;
   }
 
   async sendImage(
