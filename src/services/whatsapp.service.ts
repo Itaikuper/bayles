@@ -168,7 +168,7 @@ export class WhatsAppService {
             }
 
             // Layer 2: Text-based dedup (10s window, JID-agnostic for DMs)
-            const isDM = !jid.endsWith('@g.us');
+            const isDM = !jid.endsWith('@g.us') && !jid.endsWith('@newsletter');
             const dedupKey = isDM ? `dm:${text}` : `${jid}:${text}`;
             const now = Date.now();
             const lastSeen = this.recentMessages.get(dedupKey);
@@ -304,6 +304,22 @@ export class WhatsAppService {
       id: group.id,
       name: group.subject,
     }));
+  }
+
+  async getNewsletterMetadata(key: string, type: 'jid' | 'invite' = 'jid'): Promise<{
+    id: string;
+    name: string;
+    description: string;
+    subscribers: number;
+  }> {
+    if (!this.sock) throw new Error('WhatsApp not connected');
+    const metadata = await (this.sock as any).newsletterMetadata(type, key);
+    return {
+      id: metadata.id,
+      name: metadata.name || '',
+      description: metadata.desc || '',
+      subscribers: metadata.subscribers || 0,
+    };
   }
 
   async downloadAudio(audioMessage: proto.Message.IAudioMessage): Promise<Buffer> {

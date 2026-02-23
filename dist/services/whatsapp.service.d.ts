@@ -26,6 +26,12 @@ export declare class WhatsAppService {
         id: string;
         name: string;
     }[]>;
+    getNewsletterMetadata(key: string, type?: 'jid' | 'invite'): Promise<{
+        id: string;
+        name: string;
+        description: string;
+        subscribers: number;
+    }>;
     downloadAudio(audioMessage: proto.Message.IAudioMessage): Promise<Buffer>;
     downloadImage(imageMessage: proto.Message.IImageMessage): Promise<Buffer>;
     downloadDocument(documentMessage: proto.Message.IDocumentMessage): Promise<Buffer>;

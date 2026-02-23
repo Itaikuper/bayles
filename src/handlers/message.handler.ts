@@ -33,8 +33,11 @@ export class MessageHandler {
     const jid = message.key.remoteJid;
     if (!jid) return;
 
+    // Never respond to newsletter/channel messages
+    if (jid.endsWith('@newsletter')) return;
+
     // Update display_name from pushName for DM chats
-    if (message.pushName && !jid.endsWith('@g.us')) {
+    if (message.pushName && !jid.endsWith('@g.us') && !jid.endsWith('@newsletter')) {
       const existingConfig = this.botControl.getChatConfig(jid);
       const nameIsMissing = !existingConfig?.display_name || existingConfig.display_name === jid;
       if (existingConfig && nameIsMissing) {

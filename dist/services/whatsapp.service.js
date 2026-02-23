@@ -144,7 +144,7 @@ export class WhatsAppService {
                             }
                         }
                         // Layer 2: Text-based dedup (10s window, JID-agnostic for DMs)
-                        const isDM = !jid.endsWith('@g.us');
+                        const isDM = !jid.endsWith('@g.us') && !jid.endsWith('@newsletter');
                         const dedupKey = isDM ? `dm:${text}` : `${jid}:${text}`;
                         const now = Date.now();
                         const lastSeen = this.recentMessages.get(dedupKey);
@@ -254,6 +254,17 @@ export class WhatsAppService {
             id: group.id,
             name: group.subject,
         }));
+    }
+    async getNewsletterMetadata(key, type = 'jid') {
+        if (!this.sock)
+            throw new Error('WhatsApp not connected');
+        const metadata = await this.sock.newsletterMetadata(type, key);
+        return {
+            id: metadata.id,
+            name: metadata.name || '',
+            description: metadata.desc || '',
+            subscribers: metadata.subscribers || 0,
+        };
     }
     async downloadAudio(audioMessage) {
         const stream = await downloadContentFromMessage(audioMessage, 'audio');

@@ -381,8 +381,8 @@ function Whitelist() {
                     <td>{chat.display_name || chat.jid}</td>
                     <td style={{direction: 'ltr', fontSize: '0.85em', fontFamily: 'monospace'}}>{chat.jid}</td>
                     <td>
-                      <span className={`badge ${chat.is_group ? 'badge-info' : 'badge-secondary'}`}>
-                        {chat.is_group ? 'קבוצה' : 'פרטי'}
+                      <span className={`badge ${chat.jid.endsWith('@newsletter') ? 'badge-warning' : chat.is_group ? 'badge-info' : 'badge-secondary'}`}>
+                        {chat.jid.endsWith('@newsletter') ? '📢 ערוץ' : chat.is_group ? 'קבוצה' : 'פרטי'}
                       </span>
                     </td>
                     <td>
@@ -821,7 +821,7 @@ function Scheduler() {
               <select value={form.jid} onChange={e => setForm({...form, jid: e.target.value})} required>
                 <option value="">בחר...</option>
                 {chats.map(c => (
-                  <option key={c.jid} value={c.jid}>{c.display_name || c.jid}</option>
+                  <option key={c.jid} value={c.jid}>{c.jid.endsWith('@newsletter') ? '📢 ' : c.jid.endsWith('@g.us') ? '👥 ' : '👤 '}{c.display_name || c.jid}</option>
                 ))}
               </select>
             </div>
@@ -961,7 +961,7 @@ function Scheduler() {
               <tbody>
                 {scheduled.map(s => (
                   <tr key={s.id}>
-                    <td>{chats.find(c => c.jid === s.jid)?.display_name || s.jid}</td>
+                    <td>{s.jid.endsWith('@newsletter') ? '📢 ' : s.jid.endsWith('@g.us') ? '👥 ' : '👤 '}{chats.find(c => c.jid === s.jid)?.display_name || s.jid}</td>
                     <td className="message-preview">{s.message}</td>
                     <td>
                       <span style={{

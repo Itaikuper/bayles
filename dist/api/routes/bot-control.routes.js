@@ -124,6 +124,19 @@ export function createBotControlRoutes(botControl, whatsapp) {
         res.json(activity);
     });
     // ============== Helper: Available Groups ==============
+    // Get newsletter/channel metadata
+    router.get('/newsletter/:key', async (req, res) => {
+        try {
+            const key = decodeURIComponent(req.params.key);
+            const type = req.query.type || 'jid';
+            const metadata = await whatsapp.getNewsletterMetadata(key, type);
+            res.json(metadata);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to fetch newsletter metadata';
+            res.status(500).json({ error: message });
+        }
+    });
     // Get available groups to add to whitelist
     router.get('/available-groups', async (req, res) => {
         try {
