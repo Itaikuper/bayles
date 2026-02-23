@@ -368,6 +368,7 @@ function Whitelist() {
               <thead>
                 <tr>
                   <th>שם</th>
+                  <th>JID</th>
                   <th>סוג</th>
                   <th>מצב AI</th>
                   <th>סטטוס</th>
@@ -378,6 +379,7 @@ function Whitelist() {
                 {chats.map(chat => (
                   <tr key={chat.jid}>
                     <td>{chat.display_name || chat.jid}</td>
+                    <td style={{direction: 'ltr', fontSize: '0.85em', fontFamily: 'monospace'}}>{chat.jid}</td>
                     <td>
                       <span className={`badge ${chat.is_group ? 'badge-info' : 'badge-secondary'}`}>
                         {chat.is_group ? 'קבוצה' : 'פרטי'}
