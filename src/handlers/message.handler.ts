@@ -11,6 +11,7 @@ import { logger } from '../utils/logger.js';
 import type { ScheduleArgs, CalendarListArgs, CalendarCreateArgs, CalendarUpdateArgs, CalendarDeleteArgs, SendMessageArgs, MediationSession } from '../types/index.js';
 import { getSongRepository } from '../database/repositories/song.repository.js';
 import { getContactRepository } from '../database/repositories/contact.repository.js';
+import { getHoshayaDirectoryRepository } from '../database/repositories/hoshaya-directory.repository.js';
 import { getCalendarLinkRepository } from '../database/repositories/calendar-link.repository.js';
 
 export class MessageHandler {
@@ -210,6 +211,9 @@ export class MessageHandler {
         } else if (response.functionCall.name === 'search_contact') {
           const args = response.functionCall.args as { query: string };
           actionSummary = await this.handleContactSearch(jid, args.query, message);
+        } else if (response.functionCall.name === 'search_hoshaya_directory') {
+          const args = response.functionCall.args as { query: string };
+          actionSummary = await this.handleHoshayaDirectorySearch(jid, args.query, message);
         } else if (response.functionCall.name === 'list_calendar_events') {
           actionSummary = await this.handleCalendarList(jid, response.functionCall.args as unknown as CalendarListArgs, message);
         } else if (response.functionCall.name === 'create_calendar_event') {
@@ -973,6 +977,41 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
     );
     const names = results.map(c => c.name).join(', ');
     return `[חיפשתי איש קשר "${query}" ומצאתי: ${names}]`;
+  }
+
+  /**
+   * Handle Hoshaya village directory search via Gemini function calling
+   */
+  private async handleHoshayaDirectorySearch(
+    jid: string,
+    query: string,
+    originalMessage: proto.IWebMessageInfo
+  ): Promise<string> {
+    const repo = getHoshayaDirectoryRepository();
+    const results = repo.search(query, 10);
+
+    if (results.length === 0) {
+      await this.whatsapp.sendReply(jid, `לא נמצאו תושבים בהושעיה עם השם "${query}".`, originalMessage);
+      return `[חיפשתי בספר הטלפונים של הושעיה "${query}" ולא מצאתי תוצאות]`;
+    }
+
+    const list = results.map((r, i) => {
+      const phones: string[] = [];
+      if (r.mobile_phone) phones.push(`נייד: ${r.mobile_phone}`);
+      if (r.home_phone) phones.push(`בית: ${r.home_phone}`);
+      const phoneStr = phones.length > 0 ? phones.join(' | ') : 'אין טלפון';
+      let line = `${i + 1}. *${r.last_name} ${r.first_name}*: ${phoneStr}`;
+      if (r.address) line += `\n   📍 ${r.address}`;
+      return line;
+    }).join('\n');
+
+    await this.whatsapp.sendReply(
+      jid,
+      `📞 ספר טלפונים הושעיה - נמצאו ${results.length} תוצאות:\n\n${list}`,
+      originalMessage
+    );
+    const names = results.map(r => `${r.last_name} ${r.first_name}`).join(', ');
+    return `[חיפשתי בספר הטלפונים של הושעיה "${query}" ומצאתי: ${names}]`;
   }
 
   /**

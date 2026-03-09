@@ -383,4 +383,30 @@ export function runMigrations(): void {
     db.prepare('INSERT INTO migrations (name) VALUES (?)').run('011_calendar_reminders');
     logger.info('Migration 011_calendar_reminders completed');
   }
+
+  // Migration 012: Hoshaya village phone directory
+  const applied012 = db.prepare('SELECT name FROM migrations WHERE name = ?').get('012_hoshaya_directory');
+
+  if (!applied012) {
+    logger.info('Running migration: 012_hoshaya_directory');
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS hoshaya_directory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        first_name TEXT NOT NULL,
+        last_name TEXT NOT NULL,
+        home_phone TEXT DEFAULT '',
+        mobile_phone TEXT DEFAULT '',
+        address TEXT DEFAULT '',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_hoshaya_first_name ON hoshaya_directory(first_name)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_hoshaya_last_name ON hoshaya_directory(last_name)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_hoshaya_full_name ON hoshaya_directory(first_name, last_name)`);
+
+    db.prepare('INSERT INTO migrations (name) VALUES (?)').run('012_hoshaya_directory');
+    logger.info('Migration 012_hoshaya_directory completed');
+  }
 }

@@ -78,6 +78,21 @@ const searchContactDeclaration = {
         required: ['query'],
     },
 };
+// Function declaration for Hoshaya village phone directory search
+const searchHoshayaDirectoryDeclaration = {
+    name: 'search_hoshaya_directory',
+    description: 'Search the Hoshaya village phone directory for a resident by name. Use when user asks for a phone number of someone in Hoshaya, or asks to find a resident. Keywords: טלפון בהושעיה, מספר של, תושב הושעיה, ספר טלפונים הושעיה, מי גר ב.',
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            query: {
+                type: Type.STRING,
+                description: 'Name to search for (first name, last name, or both). Examples: "כהן", "דוד כהן", "משה"',
+            },
+        },
+        required: ['query'],
+    },
+};
 // Function declaration for sending messages to other people/groups
 const sendMessageDeclaration = {
     name: 'send_message',
@@ -278,7 +293,7 @@ export class GeminiService {
             const dateContext = `Today is ${today.toISOString().split('T')[0]} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][today.getDay()]}).`;
             // Capability context so the model knows what it can do and trusts action records
             const capabilityContext = `
-You have real capabilities through function calling: send messages to other people (send_message), schedule messages (create_schedule), search songs (search_song), search contacts (search_contact), and manage calendar events.
+You have real capabilities through function calling: send messages to other people (send_message), schedule messages (create_schedule), search songs (search_song), search contacts (search_contact), search Hoshaya village phone directory (search_hoshaya_directory), and manage calendar events.
 Messages in [brackets] in conversation history are factual records of actions you performed. Trust them completely — if it says [שלחתי הודעה ל...], you DID send that message. Never deny or contradict these records.`;
             // Only enable function calling when message matches known patterns
             // Otherwise use googleSearch for regular queries (weather, current events, etc.)
@@ -286,14 +301,16 @@ Messages in [brackets] in conversation history are factual records of actions yo
             const schedulingKeywords = /תזמן|תזכיר|תשלח בשעה|כל יום|מחר בשעה|schedule|remind|תקבע|הזכר לי|בשעה \d/i;
             const songKeywords = /שיר|אקורד|טאב|גיטרה|chord|song|tab|לנגן|תנגן|אקורד/i;
             const contactKeywords = /טלפון|פלאפון|מספר של|איש קשר|phone|contact|number/i;
+            const hoshayaDirectoryKeywords = /הושעיה|טלפון של|מספר של|ספר טלפונים|מי גר ב|תושב/i;
             const calendarKeywords = /מה יש לי|יומן|אירוע|פגישה|לוח|לוז|תוסיף אירוע|תקבע פגישה|תכניס ליומן|תמחק אירוע|תבטל פגישה|תשנה אירוע|תזיז|תעדכן אירוע|calendar|events|meeting|schedule|agenda/i;
             const sendMessageKeywords = /תשלח ל|שלח ל|שלח .{1,30} ל|לשלוח ל|לשלוח .{1,30} ל|לשלוח הודעה|תגיד ל|תודיע ל|תעביר ל|הודעה ל|send to|send .{1,30} to|tell .+ that|forward to|למספר \d/i;
             const isSchedulingRequest = schedulingKeywords.test(userMessage);
             const isSongRequest = songKeywords.test(userMessage);
             const isContactRequest = contactKeywords.test(userMessage);
+            const isHoshayaDirectoryRequest = hoshayaDirectoryKeywords.test(userMessage);
             const isCalendarRequest = calendarKeywords.test(userMessage);
             const isSendMessageRequest = sendMessageKeywords.test(userMessage);
-            const isFunctionCallRequest = isSchedulingRequest || isSongRequest || isContactRequest || isCalendarRequest || isSendMessageRequest;
+            const isFunctionCallRequest = isSchedulingRequest || isSongRequest || isContactRequest || isHoshayaDirectoryRequest || isCalendarRequest || isSendMessageRequest;
             const functionDeclarations = [];
             if (isSchedulingRequest)
                 functionDeclarations.push(createScheduleDeclaration);
@@ -301,6 +318,8 @@ Messages in [brackets] in conversation history are factual records of actions yo
                 functionDeclarations.push(searchSongDeclaration);
             if (isContactRequest)
                 functionDeclarations.push(searchContactDeclaration);
+            if (isHoshayaDirectoryRequest)
+                functionDeclarations.push(searchHoshayaDirectoryDeclaration);
             if (isCalendarRequest) {
                 functionDeclarations.push(listCalendarEventsDeclaration, createCalendarEventDeclaration, updateCalendarEventDeclaration, deleteCalendarEventDeclaration);
             }

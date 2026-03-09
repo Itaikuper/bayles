@@ -46,6 +46,10 @@ export declare class MessageHandler {
      */
     private handleContactSearch;
     /**
+     * Handle Hoshaya village directory search via Gemini function calling
+     */
+    private handleHoshayaDirectorySearch;
+    /**
      * Resolve target name to JID - search in bot's groups or use current chat
      */
     private resolveScheduleTarget;
