@@ -672,7 +672,7 @@ Instructions:
 
 Respond with ONLY the JSON array, nothing else.`;
             const response = await this.ai.models.generateContent({
-                model: 'gemini-2.0-flash',
+                model: 'gemini-2.5-flash',
                 contents: prompt,
             });
             const text = response.text?.trim();
