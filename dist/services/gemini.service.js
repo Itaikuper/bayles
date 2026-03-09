@@ -301,7 +301,7 @@ Messages in [brackets] in conversation history are factual records of actions yo
             const schedulingKeywords = /תזמן|תזכיר|תשלח בשעה|כל יום|מחר בשעה|schedule|remind|תקבע|הזכר לי|בשעה \d/i;
             const songKeywords = /שיר|אקורד|טאב|גיטרה|chord|song|tab|לנגן|תנגן|אקורד/i;
             const contactKeywords = /טלפון|פלאפון|מספר של|איש קשר|phone|contact|number/i;
-            const hoshayaDirectoryKeywords = /הושעיה|טלפון של|מספר של|ספר טלפונים|מי גר ב|תושב/i;
+            const hoshayaDirectoryKeywords = /הושעיה|טלפון של|מספר של|ספר טלפונים|מי גר ב|תושב|טלפון|פלאפון|מספר של|איש קשר|phone|contact|number/i;
             const calendarKeywords = /מה יש לי|יומן|אירוע|פגישה|לוח|לוז|תוסיף אירוע|תקבע פגישה|תכניס ליומן|תמחק אירוע|תבטל פגישה|תשנה אירוע|תזיז|תעדכן אירוע|calendar|events|meeting|schedule|agenda/i;
             const sendMessageKeywords = /תשלח ל|שלח ל|שלח .{1,30} ל|לשלוח ל|לשלוח .{1,30} ל|לשלוח הודעה|תגיד ל|תודיע ל|תעביר ל|הודעה ל|send to|send .{1,30} to|tell .+ that|forward to|למספר \d/i;
             const isSchedulingRequest = schedulingKeywords.test(userMessage);
@@ -310,7 +310,11 @@ Messages in [brackets] in conversation history are factual records of actions yo
             const isHoshayaDirectoryRequest = hoshayaDirectoryKeywords.test(userMessage);
             const isCalendarRequest = calendarKeywords.test(userMessage);
             const isSendMessageRequest = sendMessageKeywords.test(userMessage);
-            const isFunctionCallRequest = isSchedulingRequest || isSongRequest || isContactRequest || isHoshayaDirectoryRequest || isCalendarRequest || isSendMessageRequest;
+            // Also check if recent history has a hoshaya directory search (for follow-up queries like just a name)
+            const toolHistoryKey = `${tenantId}:${jid}`;
+            const recentHistory = this.conversationHistory.get(toolHistoryKey) ?? [];
+            const hasRecentDirectorySearch = recentHistory.slice(-4).some(m => m.role === 'model' && m.parts?.some(p => p.text?.includes('חיפשתי בספר הטלפונים של הושעיה')));
+            const isFunctionCallRequest = isSchedulingRequest || isSongRequest || isContactRequest || isHoshayaDirectoryRequest || isCalendarRequest || isSendMessageRequest || hasRecentDirectorySearch;
             const functionDeclarations = [];
             if (isSchedulingRequest)
                 functionDeclarations.push(createScheduleDeclaration);
@@ -318,7 +322,7 @@ Messages in [brackets] in conversation history are factual records of actions yo
                 functionDeclarations.push(searchSongDeclaration);
             if (isContactRequest)
                 functionDeclarations.push(searchContactDeclaration);
-            if (isHoshayaDirectoryRequest)
+            if (isHoshayaDirectoryRequest || hasRecentDirectorySearch)
                 functionDeclarations.push(searchHoshayaDirectoryDeclaration);
             if (isCalendarRequest) {
                 functionDeclarations.push(listCalendarEventsDeclaration, createCalendarEventDeclaration, updateCalendarEventDeclaration, deleteCalendarEventDeclaration);
