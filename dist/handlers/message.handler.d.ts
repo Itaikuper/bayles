@@ -5,6 +5,7 @@ import { SchedulerService } from '../services/scheduler.service.js';
 import { BotControlService } from '../services/bot-control.service.js';
 import { BirthdayService } from '../services/birthday.service.js';
 import { CalendarService } from '../services/calendar.service.js';
+import { ChoreRotationService } from '../services/chore-rotation.service.js';
 export declare class MessageHandler {
     private whatsapp;
     private gemini;
@@ -12,12 +13,13 @@ export declare class MessageHandler {
     private botControl;
     private birthdayService;
     private calendarService?;
+    private choreRotationService?;
     private voiceModeJids;
     private sendMessageCooldowns;
     private readonly SEND_MESSAGE_COOLDOWN_MS;
     private mediationMessages;
     private readonly MEDIATION_TTL_MS;
-    constructor(whatsapp: WhatsAppService, gemini: GeminiService, scheduler: SchedulerService, botControl: BotControlService, birthdayService: BirthdayService, calendarService?: CalendarService | undefined);
+    constructor(whatsapp: WhatsAppService, gemini: GeminiService, scheduler: SchedulerService, botControl: BotControlService, birthdayService: BirthdayService, calendarService?: CalendarService | undefined, choreRotationService?: ChoreRotationService | undefined);
     handle(message: proto.IWebMessageInfo): Promise<void>;
     private extractText;
     private handleAudioMessage;
@@ -49,6 +51,10 @@ export declare class MessageHandler {
      * Handle Hoshaya village directory search via Gemini function calling
      */
     private handleHoshayaDirectorySearch;
+    /**
+     * Handle chore rotation management via Gemini function calling
+     */
+    private handleChoreRotation;
     /**
      * Resolve target name to JID - search in bot's groups or use current chat
      */

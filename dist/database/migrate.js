@@ -337,4 +337,31 @@ export function runMigrations() {
         db.prepare('INSERT INTO migrations (name) VALUES (?)').run('012_hoshaya_directory');
         logger.info('Migration 012_hoshaya_directory completed');
     }
+    // Migration 013: Chore rotations (family duty scheduling)
+    const applied013 = db.prepare('SELECT name FROM migrations WHERE name = ?').get('013_chore_rotations');
+    if (!applied013) {
+        logger.info('Running migration: 013_chore_rotations');
+        db.exec(`
+      CREATE TABLE IF NOT EXISTS chore_rotations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        jid TEXT NOT NULL,
+        name TEXT NOT NULL,
+        members TEXT NOT NULL,
+        current_index INTEGER DEFAULT 0,
+        frequency TEXT DEFAULT 'daily' CHECK(frequency IN ('daily', 'weekly')),
+        reminder_hour INTEGER DEFAULT 8,
+        reminder_minute INTEGER DEFAULT 0,
+        active INTEGER DEFAULT 1,
+        last_sent_date TEXT,
+        tenant_id TEXT DEFAULT 'default',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(jid, name)
+      )
+    `);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_chore_rotations_jid ON chore_rotations(jid)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_chore_rotations_active ON chore_rotations(active)`);
+        db.prepare('INSERT INTO migrations (name) VALUES (?)').run('013_chore_rotations');
+        logger.info('Migration 013_chore_rotations completed');
+    }
 }

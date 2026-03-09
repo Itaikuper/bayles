@@ -79,6 +79,14 @@ export interface SendMessageArgs {
     scheduledHour?: number;
     scheduledMinute?: number;
 }
+export interface ChoreRotationArgs {
+    action: 'create' | 'list' | 'status' | 'advance' | 'delete' | 'edit';
+    rotationName?: string;
+    members?: string[];
+    frequency?: 'daily' | 'weekly';
+    reminderHour?: number;
+    reminderMinute?: number;
+}
 export interface MediationSession {
     initiatorJid: string;
     initiatorName: string;

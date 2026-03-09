@@ -100,6 +100,54 @@ const searchHoshayaDirectoryDeclaration: FunctionDeclaration = {
   },
 };
 
+// Function declaration for managing family chore rotations
+const manageChoreRotationDeclaration: FunctionDeclaration = {
+  name: 'manage_chore_rotation',
+  description: `Manage family chore rotations (תורנויות). Use when user talks about chores, rotations, duty, turns, dishwasher duties, garbage, cleaning duties, or asks who is on duty.
+Examples:
+- "מי מפנה מדיח היום?" → action: "status", rotationName: "פינוי מדיח"
+- "מי מכניס מדיח?" → action: "status", rotationName: "הכנסת מדיח"
+- "מה התורנות היום?" → action: "list"
+- "של מי האשפה?" → action: "status", rotationName: "אשפה"
+- "צור תורנות פינוי מדיח עם אביה, אוריה, איתי" → action: "create"
+- "הראה את כל התורנויות" → action: "list"
+- "תדלג בתורנות מדיח" → action: "advance"
+- "תמחק את התורנות של אשפה" → action: "delete"
+- "תעדכן את התורנות מדיח: אביה, אוריה, איתי, נועה" → action: "edit"
+Keywords: תורנות, תורנויות, תור של, מי היום, של מי, מדיח, אשפה, ניקיון, מי מפנה, מי מכניס, מה התור, chore, rotation, duty.`,
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      action: {
+        type: Type.STRING,
+        description: 'Action: "create" (new rotation), "list" (show all), "status" (who is on duty for a specific rotation), "advance" (skip to next person), "delete" (remove rotation), "edit" (update members list).',
+      },
+      rotationName: {
+        type: Type.STRING,
+        description: 'Name of the rotation in Hebrew. Examples: "פינוי מדיח", "הכנסת מדיח", "אשפה", "ניקיון סלון". Required for create/status/advance/delete/edit.',
+      },
+      members: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+        description: 'Ordered list of member names. Required for "create" and "edit". Example: ["אביה", "אוריה", "איתי"]',
+      },
+      frequency: {
+        type: Type.STRING,
+        description: 'Rotation frequency: "daily" (default) or "weekly". Only for "create".',
+      },
+      reminderHour: {
+        type: Type.NUMBER,
+        description: 'Hour to send daily reminder (0-23). Default 8. Only for "create".',
+      },
+      reminderMinute: {
+        type: Type.NUMBER,
+        description: 'Minute for daily reminder (0-59). Default 0. Only for "create".',
+      },
+    },
+    required: ['action'],
+  },
+};
+
 // Function declaration for sending messages to other people/groups
 const sendMessageDeclaration: FunctionDeclaration = {
   name: 'send_message',
@@ -313,7 +361,7 @@ export class GeminiService {
 
       // Capability context so the model knows what it can do and trusts action records
       const capabilityContext = `
-You have real capabilities through function calling: send messages to other people (send_message), schedule messages (create_schedule), search songs (search_song), search contacts (search_contact), search Hoshaya village phone directory (search_hoshaya_directory), and manage calendar events.
+You have real capabilities through function calling: send messages to other people (send_message), schedule messages (create_schedule), search songs (search_song), search contacts (search_contact), search Hoshaya village phone directory (search_hoshaya_directory), manage calendar events, and manage family chore rotations (manage_chore_rotation).
 CRITICAL: For ANY phone number or contact lookup, you MUST call search_hoshaya_directory. NEVER answer phone queries from memory or conversation history. You do NOT know any phone numbers - always call the function.
 Messages in [brackets] in conversation history are factual records of actions you performed. Trust them completely — if it says [שלחתי הודעה ל...], you DID send that message. Never deny or contradict these records.`;
 
@@ -326,19 +374,21 @@ Messages in [brackets] in conversation history are factual records of actions yo
       const hoshayaDirectoryKeywords = /הושעיה|טלפון של|מספר של|ספר טלפונים|מי גר ב|תושב|טלפון|פלאפון|מספר של|איש קשר|phone|contact|number/i;
       const calendarKeywords = /מה יש לי|יומן|אירוע|פגישה|לוח|לוז|תוסיף אירוע|תקבע פגישה|תכניס ליומן|תמחק אירוע|תבטל פגישה|תשנה אירוע|תזיז|תעדכן אירוע|calendar|events|meeting|schedule|agenda/i;
       const sendMessageKeywords = /תשלח ל|שלח ל|שלח .{1,30} ל|לשלוח ל|לשלוח .{1,30} ל|לשלוח הודעה|תגיד ל|תודיע ל|תעביר ל|הודעה ל|send to|send .{1,30} to|tell .+ that|forward to|למספר \d/i;
+      const choreKeywords = /תורנות|תורנויות|תור של|מי היום|של מי (ה|ל)?|מדיח|אשפה|ניקיון|מי מפנה|מי מכניס|מה התור|chore|rotation|duty/i;
       const isSchedulingRequest = schedulingKeywords.test(userMessage);
       const isSongRequest = songKeywords.test(userMessage);
       const isContactRequest = contactKeywords.test(userMessage);
       const isHoshayaDirectoryRequest = hoshayaDirectoryKeywords.test(userMessage);
       const isCalendarRequest = calendarKeywords.test(userMessage);
       const isSendMessageRequest = sendMessageKeywords.test(userMessage);
+      const isChoreRequest = choreKeywords.test(userMessage);
       // Also check if recent history has a hoshaya directory search (for follow-up queries like just a name)
       const toolHistoryKey = `${tenantId}:${jid}`;
       const recentHistory = this.conversationHistory.get(toolHistoryKey) ?? [];
       const hasRecentDirectorySearch = recentHistory.slice(-4).some(m =>
         m.role === 'model' && m.parts?.some(p => (p as { text?: string }).text?.includes('חיפשתי בספר הטלפונים של הושעיה'))
       );
-      const isFunctionCallRequest = isSchedulingRequest || isSongRequest || isContactRequest || isHoshayaDirectoryRequest || isCalendarRequest || isSendMessageRequest || hasRecentDirectorySearch;
+      const isFunctionCallRequest = isSchedulingRequest || isSongRequest || isContactRequest || isHoshayaDirectoryRequest || isCalendarRequest || isSendMessageRequest || hasRecentDirectorySearch || isChoreRequest;
 
       const functionDeclarations: FunctionDeclaration[] = [];
       if (isSchedulingRequest) functionDeclarations.push(createScheduleDeclaration);
@@ -354,6 +404,7 @@ Messages in [brackets] in conversation history are factual records of actions yo
         );
       }
       if (isSendMessageRequest) functionDeclarations.push(sendMessageDeclaration);
+      if (isChoreRequest) functionDeclarations.push(manageChoreRotationDeclaration);
 
       const tools = isFunctionCallRequest
         ? [{ functionDeclarations }]

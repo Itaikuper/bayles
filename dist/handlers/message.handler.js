@@ -12,18 +12,20 @@ export class MessageHandler {
     botControl;
     birthdayService;
     calendarService;
+    choreRotationService;
     voiceModeJids = new Set();
     sendMessageCooldowns = new Map();
     SEND_MESSAGE_COOLDOWN_MS = 30_000;
     mediationMessages = new Map();
     MEDIATION_TTL_MS = 60 * 60 * 1000; // 1 hour
-    constructor(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService) {
+    constructor(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService, choreRotationService) {
         this.whatsapp = whatsapp;
         this.gemini = gemini;
         this.scheduler = scheduler;
         this.botControl = botControl;
         this.birthdayService = birthdayService;
         this.calendarService = calendarService;
+        this.choreRotationService = choreRotationService;
     }
     async handle(message) {
         const jid = message.key.remoteJid;
@@ -189,6 +191,9 @@ export class MessageHandler {
                 else if (response.functionCall.name === 'send_message') {
                     const senderName = message.pushName || this.botControl.getChatConfig(jid)?.display_name || 'מישהו';
                     actionSummary = await this.handleSendMessage(jid, response.functionCall.args, message, senderName);
+                }
+                else if (response.functionCall.name === 'manage_chore_rotation') {
+                    actionSummary = await this.handleChoreRotation(jid, response.functionCall.args, message);
                 }
                 else {
                     // Unknown function call - log and ignore
@@ -707,6 +712,120 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
         }).join('\n');
         await this.whatsapp.sendReply(jid, `📞 ספר טלפונים הושעיה - נמצאו ${results.length} תוצאות:\n\n${list}`, originalMessage);
         return `[חיפשתי בספר הטלפונים של הושעיה "${query}" ושלחתי ${results.length} תוצאות למשתמש]`;
+    }
+    /**
+     * Handle chore rotation management via Gemini function calling
+     */
+    async handleChoreRotation(jid, args, originalMessage) {
+        if (!this.choreRotationService) {
+            await this.whatsapp.sendReply(jid, 'שירות התורנויות לא זמין.', originalMessage);
+            return '[שגיאה: שירות תורנויות לא זמין]';
+        }
+        const repo = this.choreRotationService.getRepository();
+        switch (args.action) {
+            case 'create': {
+                if (!args.rotationName || !args.members || args.members.length < 2) {
+                    await this.whatsapp.sendReply(jid, 'צריך שם לתורנות ולפחות 2 משתתפים.', originalMessage);
+                    return '[שגיאה: חסרים פרטים ליצירת תורנות]';
+                }
+                // Check if rotation already exists
+                const existing = repo.findByJidAndName(jid, args.rotationName);
+                if (existing) {
+                    await this.whatsapp.sendReply(jid, `כבר קיימת תורנות בשם "${args.rotationName}". אפשר לערוך אותה או למחוק ולהקים חדשה.`, originalMessage);
+                    return `[תורנות "${args.rotationName}" כבר קיימת]`;
+                }
+                repo.create({
+                    jid,
+                    name: args.rotationName,
+                    members: args.members,
+                    frequency: args.frequency || 'daily',
+                    reminder_hour: args.reminderHour ?? 8,
+                    reminder_minute: args.reminderMinute ?? 0,
+                });
+                const memberList = args.members.join(', ');
+                const timeStr = `${String(args.reminderHour ?? 8).padStart(2, '0')}:${String(args.reminderMinute ?? 0).padStart(2, '0')}`;
+                const msg = `✅ *תורנות "${args.rotationName}" נוצרה!*\n\n👥 משתתפים: ${memberList}\n🔄 תדירות: ${args.frequency === 'weekly' ? 'שבועי' : 'יומי'}\n⏰ תזכורת: ${timeStr}\n\nהתור הראשון: *${args.members[0]}*`;
+                await this.whatsapp.sendReply(jid, msg, originalMessage);
+                return `[יצרתי תורנות "${args.rotationName}" עם ${args.members.length} משתתפים: ${memberList}]`;
+            }
+            case 'list': {
+                const summary = this.choreRotationService.getRotationsSummary(jid);
+                await this.whatsapp.sendReply(jid, summary, originalMessage);
+                return `[הצגתי את רשימת התורנויות]`;
+            }
+            case 'status': {
+                if (!args.rotationName) {
+                    // If no name given, show all
+                    const summary = this.choreRotationService.getRotationsSummary(jid);
+                    await this.whatsapp.sendReply(jid, summary, originalMessage);
+                    return `[הצגתי את כל התורנויות]`;
+                }
+                const rotation = repo.searchByJidAndName(jid, args.rotationName);
+                if (!rotation) {
+                    await this.whatsapp.sendReply(jid, `לא נמצאה תורנות בשם "${args.rotationName}".`, originalMessage);
+                    return `[לא נמצאה תורנות "${args.rotationName}"]`;
+                }
+                const assignee = this.choreRotationService.getCurrentAssignee(rotation);
+                const members = JSON.parse(rotation.members);
+                const msg = `📋 *${rotation.name}*: היום התור של *${assignee}*\n(מתוך: ${members.join(', ')})`;
+                await this.whatsapp.sendReply(jid, msg, originalMessage);
+                return `[תורנות "${rotation.name}": התור של ${assignee}]`;
+            }
+            case 'advance': {
+                if (!args.rotationName) {
+                    await this.whatsapp.sendReply(jid, 'צריך לציין את שם התורנות.', originalMessage);
+                    return '[שגיאה: לא צוין שם תורנות לדילוג]';
+                }
+                const rotation = repo.searchByJidAndName(jid, args.rotationName);
+                if (!rotation) {
+                    await this.whatsapp.sendReply(jid, `לא נמצאה תורנות בשם "${args.rotationName}".`, originalMessage);
+                    return `[לא נמצאה תורנות "${args.rotationName}"]`;
+                }
+                const members = JSON.parse(rotation.members);
+                const newIndex = (rotation.current_index + 1) % members.length;
+                repo.advance(rotation.id, newIndex);
+                const newAssignee = members[newIndex];
+                await this.whatsapp.sendReply(jid, `⏭️ תורנות "${rotation.name}" הועברה. התור עכשיו של *${newAssignee}*.`, originalMessage);
+                return `[דילגתי בתורנות "${rotation.name}", התור עכשיו של ${newAssignee}]`;
+            }
+            case 'delete': {
+                if (!args.rotationName) {
+                    await this.whatsapp.sendReply(jid, 'צריך לציין את שם התורנות למחיקה.', originalMessage);
+                    return '[שגיאה: לא צוין שם תורנות למחיקה]';
+                }
+                const rotation = repo.searchByJidAndName(jid, args.rotationName);
+                if (!rotation) {
+                    await this.whatsapp.sendReply(jid, `לא נמצאה תורנות בשם "${args.rotationName}".`, originalMessage);
+                    return `[לא נמצאה תורנות "${args.rotationName}"]`;
+                }
+                repo.delete(rotation.id);
+                await this.whatsapp.sendReply(jid, `🗑️ תורנות "${rotation.name}" נמחקה.`, originalMessage);
+                return `[מחקתי את התורנות "${rotation.name}"]`;
+            }
+            case 'edit': {
+                if (!args.rotationName) {
+                    await this.whatsapp.sendReply(jid, 'צריך לציין את שם התורנות לעריכה.', originalMessage);
+                    return '[שגיאה: לא צוין שם תורנות לעריכה]';
+                }
+                const rotation = repo.searchByJidAndName(jid, args.rotationName);
+                if (!rotation) {
+                    await this.whatsapp.sendReply(jid, `לא נמצאה תורנות בשם "${args.rotationName}".`, originalMessage);
+                    return `[לא נמצאה תורנות "${args.rotationName}"]`;
+                }
+                if (!args.members || args.members.length < 2) {
+                    await this.whatsapp.sendReply(jid, 'צריך לפחות 2 משתתפים.', originalMessage);
+                    return '[שגיאה: חסרים משתתפים לעריכה]';
+                }
+                repo.updateMembers(rotation.id, args.members);
+                const memberList = args.members.join(', ');
+                await this.whatsapp.sendReply(jid, `✏️ תורנות "${rotation.name}" עודכנה.\n👥 משתתפים חדשים: ${memberList}\nהתור חוזר ל: *${args.members[0]}*`, originalMessage);
+                return `[עדכנתי תורנות "${rotation.name}" עם משתתפים: ${memberList}]`;
+            }
+            default: {
+                await this.whatsapp.sendReply(jid, 'פעולה לא מוכרת. אפשר: צור/הצג/מצב/דלג/מחק/ערוך תורנות.', originalMessage);
+                return `[פעולת תורנות לא מוכרת: ${args.action}]`;
+            }
+        }
     }
     /**
      * Resolve target name to JID - search in bot's groups or use current chat

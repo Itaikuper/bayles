@@ -5,6 +5,7 @@ import { SchedulerService } from './services/scheduler.service.js';
 import { BirthdayService } from './services/birthday.service.js';
 import { CompactionService } from './services/compaction.service.js';
 import { CalendarService } from './services/calendar.service.js';
+import { ChoreRotationService } from './services/chore-rotation.service.js';
 import { getBotControlService } from './services/bot-control.service.js';
 import { MessageHandler } from './handlers/message.handler.js';
 import { validateConfig, config } from './config/env.js';
@@ -63,8 +64,11 @@ async function main() {
         else {
             logger.info('No service account found, calendar features disabled');
         }
+        // Initialize chore rotation service
+        const choreRotationService = new ChoreRotationService(whatsapp, gemini);
+        choreRotationService.start();
         // Initialize message handler
-        const messageHandler = new MessageHandler(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService);
+        const messageHandler = new MessageHandler(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService, choreRotationService);
         // Auto-whitelist family group members (group + private DMs)
         let familyGroupJid = null;
         const syncFamilyGroup = async () => {
@@ -178,6 +182,7 @@ async function main() {
             birthdayService.stop();
             compactionService.stop();
             calendarService?.stop();
+            choreRotationService.stop();
             await pool.disconnectAll();
             closeDatabase();
             process.exit(0);
