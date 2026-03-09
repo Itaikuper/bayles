@@ -1010,8 +1010,7 @@ ${args.useAi ? '🤖 Prompt' : '💬 הודעה'}: "${args.message.length > 100 
       `📞 ספר טלפונים הושעיה - נמצאו ${results.length} תוצאות:\n\n${list}`,
       originalMessage
     );
-    const names = results.map(r => `${r.last_name} ${r.first_name}`).join(', ');
-    return `[חיפשתי בספר הטלפונים של הושעיה "${query}" ומצאתי: ${names}]`;
+    return `[חיפשתי בספר הטלפונים של הושעיה "${query}" ושלחתי ${results.length} תוצאות למשתמש]`;
   }
 
   /**

@@ -294,6 +294,7 @@ export class GeminiService {
             // Capability context so the model knows what it can do and trusts action records
             const capabilityContext = `
 You have real capabilities through function calling: send messages to other people (send_message), schedule messages (create_schedule), search songs (search_song), search contacts (search_contact), search Hoshaya village phone directory (search_hoshaya_directory), and manage calendar events.
+CRITICAL: For ANY phone number or contact lookup, you MUST call search_hoshaya_directory. NEVER answer phone queries from memory or conversation history. You do NOT know any phone numbers - always call the function.
 Messages in [brackets] in conversation history are factual records of actions you performed. Trust them completely — if it says [שלחתי הודעה ל...], you DID send that message. Never deny or contradict these records.`;
             // Only enable function calling when message matches known patterns
             // Otherwise use googleSearch for regular queries (weather, current events, etc.)
