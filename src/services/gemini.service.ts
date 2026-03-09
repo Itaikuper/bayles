@@ -87,13 +87,13 @@ const searchContactDeclaration: FunctionDeclaration = {
 // Function declaration for Hoshaya village phone directory search
 const searchHoshayaDirectoryDeclaration: FunctionDeclaration = {
   name: 'search_hoshaya_directory',
-  description: 'Search the Hoshaya village phone directory for a resident by name. Use when user asks for a phone number of someone in Hoshaya, or asks to find a resident. Keywords: טלפון בהושעיה, מספר של, תושב הושעיה, ספר טלפונים הושעיה, מי גר ב.',
+  description: 'Search the Hoshaya village phone directory for a resident by name. Use when user asks for a phone number of someone in Hoshaya, or asks to find a resident. IMPORTANT: Use ONLY the name explicitly mentioned in the CURRENT message. Do NOT combine with or infer names from conversation history.',
   parameters: {
     type: Type.OBJECT,
     properties: {
       query: {
         type: Type.STRING,
-        description: 'Name to search for (first name, last name, or both). Examples: "כהן", "דוד כהן", "משה"',
+        description: 'The exact name the user asked about in THIS message ONLY. Extract only what appears in the current message. Examples: if user says "טלפון של עמר" use "עמר", if user says "דוד כהן" use "דוד כהן". Never add names from previous messages.',
       },
     },
     required: ['query'],
