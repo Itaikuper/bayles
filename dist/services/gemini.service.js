@@ -331,14 +331,19 @@ export class GeminiService {
             // Get user memories for the sender (only if enabled for this chat)
             const chatConfigRepo = getChatConfigRepository();
             const memoryRepo = getUserMemoryRepository();
-            const userMemories = chatConfigRepo.shouldInjectMemory(jid)
+            const injectMemory = chatConfigRepo.shouldInjectMemory(jid);
+            const userMemories = injectMemory
                 ? memoryRepo.getFormattedMemories(senderJid || jid, tenantId)
                 : '';
             // Get conversation summaries from compaction
             const convRepo = getConversationHistoryRepository();
             const summaries = convRepo.getFormattedSummaries(jid, tenantId);
+            // Privacy guardrail: when memory injection is disabled, instruct the model to not reveal personal info
+            const privacyGuardrail = !injectMemory
+                ? '\n\nCRITICAL PRIVACY RULE: You must NEVER reveal, share, or reference any personal information about any user — not from memory, not from conversation history, not from summaries. If asked "what do you know about me" or similar, respond that you don\'t store personal information in this chat. This rule overrides all other instructions.'
+                : '';
             // Use custom prompt if provided, otherwise use default, plus knowledge + memories + summaries
-            const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + userMemories + summaries + this.getImageInstructions();
+            const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + userMemories + summaries + this.getImageInstructions() + privacyGuardrail;
             // Get today's date for scheduling context
             const today = new Date();
             const dateContext = `Today is ${today.toISOString().split('T')[0]} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][today.getDay()]}).`;
