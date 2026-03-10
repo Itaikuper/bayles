@@ -551,17 +551,17 @@ function Whitelist() {
               <hr style={{margin: '12px 0', borderColor: '#333'}} />
               <h4 style={{margin: '8px 0'}}>פרטיות וכלים</h4>
               <div className="form-group">
-                <label>
+                <label style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
                   <input
                     type="checkbox"
                     checked={editChat.inject_user_memory}
                     onChange={e => setEditChat({...editChat, inject_user_memory: e.target.checked})}
                   />
-                  הזרקת זיכרון אישי (עובדות שהבוט למד על המשתמש)
+                  <span>הזרקת זיכרון אישי (עובדות שהבוט למד על המשתמש)</span>
                 </label>
               </div>
               <div className="form-group">
-                <label>
+                <label style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
                   <input
                     type="checkbox"
                     checked={editChat.allowed_tools_parsed === null}
@@ -570,11 +570,11 @@ function Whitelist() {
                       allowed_tools_parsed: e.target.checked ? null : ['search_hoshaya_directory']
                     })}
                   />
-                  כל הכלים מאופשרים
+                  <span>כל הכלים מאופשרים</span>
                 </label>
               </div>
               {editChat.allowed_tools_parsed !== null && (
-                <div className="form-group" style={{paddingRight: '20px'}}>
+                <div className="form-group" style={{paddingRight: '24px'}}>
                   {[
                     {name: 'search_song', label: 'חיפוש שירים'},
                     {name: 'search_contact', label: 'אנשי קשר'},
@@ -584,7 +584,7 @@ function Whitelist() {
                     {name: 'list_calendar_events', label: 'יומן (Google Calendar)'},
                     {name: 'manage_chore_rotation', label: 'תורנויות'},
                   ].map(tool => (
-                    <label key={tool.name} style={{display: 'block', margin: '4px 0'}}>
+                    <label key={tool.name} style={{display: 'flex', alignItems: 'center', gap: '8px', margin: '6px 0'}}>
                       <input
                         type="checkbox"
                         checked={(editChat.allowed_tools_parsed || []).includes(tool.name)}
@@ -596,7 +596,7 @@ function Whitelist() {
                           setEditChat({...editChat, allowed_tools_parsed: updated});
                         }}
                       />
-                      {tool.label}
+                      <span>{tool.label}</span>
                     </label>
                   ))}
                 </div>
