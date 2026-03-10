@@ -8,6 +8,7 @@ import { logger } from '../utils/logger.js';
 import { getKnowledgeRepository } from '../database/repositories/knowledge.repository.js';
 import { getUserMemoryRepository } from '../database/repositories/user-memory.repository.js';
 import { getConversationHistoryRepository } from '../database/repositories/conversation-history.repository.js';
+import { getChatConfigRepository } from '../database/repositories/chat-config.repository.js';
 // Function declaration for natural language scheduling
 const createScheduleDeclaration = {
     name: 'create_schedule',
@@ -327,9 +328,12 @@ export class GeminiService {
             // Get knowledge base for this chat
             const knowledgeRepo = getKnowledgeRepository();
             const knowledgeContext = knowledgeRepo.getFormattedKnowledge(jid);
-            // Get user memories for the sender (not the group JID)
+            // Get user memories for the sender (only if enabled for this chat)
+            const chatConfigRepo = getChatConfigRepository();
             const memoryRepo = getUserMemoryRepository();
-            const userMemories = memoryRepo.getFormattedMemories(senderJid || jid, tenantId);
+            const userMemories = chatConfigRepo.shouldInjectMemory(jid)
+                ? memoryRepo.getFormattedMemories(senderJid || jid, tenantId)
+                : '';
             // Get conversation summaries from compaction
             const convRepo = getConversationHistoryRepository();
             const summaries = convRepo.getFormattedSummaries(jid, tenantId);
@@ -364,23 +368,26 @@ Messages in [brackets] in conversation history are factual records of actions yo
             const toolHistoryKey = `${tenantId}:${jid}`;
             const recentHistory = this.conversationHistory.get(toolHistoryKey) ?? [];
             const hasRecentDirectorySearch = recentHistory.slice(-4).some(m => m.role === 'model' && m.parts?.some(p => p.text?.includes('חיפשתי בספר הטלפונים של הושעיה')));
-            const isFunctionCallRequest = isSchedulingRequest || isSongRequest || isContactRequest || isHoshayaDirectoryRequest || isCalendarRequest || isSendMessageRequest || hasRecentDirectorySearch || isChoreRequest;
+            // Build function declarations filtered by per-chat allowed_tools setting
+            const allowedTools = chatConfigRepo.getAllowedTools(jid);
+            const isAllowed = (toolName) => allowedTools === null || allowedTools.includes(toolName);
             const functionDeclarations = [];
-            if (isSchedulingRequest)
+            if (isSchedulingRequest && isAllowed('create_schedule'))
                 functionDeclarations.push(createScheduleDeclaration);
-            if (isSongRequest)
+            if (isSongRequest && isAllowed('search_song'))
                 functionDeclarations.push(searchSongDeclaration);
-            if (isContactRequest)
+            if (isContactRequest && isAllowed('search_contact'))
                 functionDeclarations.push(searchContactDeclaration);
-            if (isHoshayaDirectoryRequest || hasRecentDirectorySearch)
+            if ((isHoshayaDirectoryRequest || hasRecentDirectorySearch) && isAllowed('search_hoshaya_directory'))
                 functionDeclarations.push(searchHoshayaDirectoryDeclaration);
-            if (isCalendarRequest) {
+            if (isCalendarRequest && isAllowed('list_calendar_events')) {
                 functionDeclarations.push(listCalendarEventsDeclaration, createCalendarEventDeclaration, updateCalendarEventDeclaration, deleteCalendarEventDeclaration);
             }
-            if (isSendMessageRequest)
+            if (isSendMessageRequest && isAllowed('send_message'))
                 functionDeclarations.push(sendMessageDeclaration);
-            if (isChoreRequest)
+            if (isChoreRequest && isAllowed('manage_chore_rotation'))
                 functionDeclarations.push(manageChoreRotationDeclaration);
+            const isFunctionCallRequest = functionDeclarations.length > 0;
             const tools = isFunctionCallRequest
                 ? [{ functionDeclarations }]
                 : [{ googleSearch: {} }];

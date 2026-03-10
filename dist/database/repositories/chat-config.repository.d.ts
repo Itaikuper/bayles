@@ -10,6 +10,8 @@ export interface ChatConfig {
     schedule_start_hour: number;
     schedule_end_hour: number;
     schedule_days: string;
+    allowed_tools: string | null;
+    inject_user_memory: number;
     created_at: string;
     updated_at: string;
 }
@@ -36,6 +38,8 @@ export interface UpdateChatConfig {
     schedule_start_hour?: number;
     schedule_end_hour?: number;
     schedule_days?: string;
+    allowed_tools?: string[] | null;
+    inject_user_memory?: boolean;
 }
 export declare class ChatConfigRepository {
     private db;
@@ -47,6 +51,19 @@ export declare class ChatConfigRepository {
     update(jid: string, updates: UpdateChatConfig): ChatConfig | null;
     delete(jid: string): boolean;
     setEnabled(jid: string, enabled: boolean): void;
+    /**
+     * Check if a specific tool is allowed for a chat.
+     * Returns true if allowed_tools is null (all tools allowed) or if the tool is in the list.
+     */
+    isToolAllowed(jid: string, toolName: string): boolean;
+    /**
+     * Get the list of allowed tools for a chat, or null if all are allowed.
+     */
+    getAllowedTools(jid: string): string[] | null;
+    /**
+     * Check if user memory should be injected for a chat.
+     */
+    shouldInjectMemory(jid: string): boolean;
     isWithinSchedule(jid: string): boolean;
 }
 export declare function getChatConfigRepository(): ChatConfigRepository;

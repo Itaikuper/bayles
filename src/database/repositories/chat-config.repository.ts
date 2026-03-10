@@ -12,6 +12,8 @@ export interface ChatConfig {
   schedule_start_hour: number;
   schedule_end_hour: number;
   schedule_days: string;
+  allowed_tools: string | null;  // JSON array of tool names, null = all allowed
+  inject_user_memory: number;    // 1 = inject, 0 = don't inject
   created_at: string;
   updated_at: string;
 }
@@ -40,6 +42,8 @@ export interface UpdateChatConfig {
   schedule_start_hour?: number;
   schedule_end_hour?: number;
   schedule_days?: string;
+  allowed_tools?: string[] | null;
+  inject_user_memory?: boolean;
 }
 
 export class ChatConfigRepository {
@@ -135,6 +139,14 @@ export class ChatConfigRepository {
       fields.push('schedule_days = ?');
       values.push(updates.schedule_days);
     }
+    if (updates.allowed_tools !== undefined) {
+      fields.push('allowed_tools = ?');
+      values.push(updates.allowed_tools === null ? null : JSON.stringify(updates.allowed_tools));
+    }
+    if (updates.inject_user_memory !== undefined) {
+      fields.push('inject_user_memory = ?');
+      values.push(updates.inject_user_memory ? 1 : 0);
+    }
 
     if (fields.length === 0) return this.getByJid(jid);
 
@@ -159,6 +171,43 @@ export class ChatConfigRepository {
     this.db
       .prepare("UPDATE chat_configs SET enabled = ?, updated_at = datetime('now') WHERE jid = ?")
       .run(enabled ? 1 : 0, jid);
+  }
+
+  /**
+   * Check if a specific tool is allowed for a chat.
+   * Returns true if allowed_tools is null (all tools allowed) or if the tool is in the list.
+   */
+  isToolAllowed(jid: string, toolName: string): boolean {
+    const config = this.getByJid(jid);
+    if (!config || config.allowed_tools === null) return true;
+    try {
+      const tools = JSON.parse(config.allowed_tools) as string[];
+      return tools.includes(toolName);
+    } catch {
+      return true; // If JSON is invalid, allow all
+    }
+  }
+
+  /**
+   * Get the list of allowed tools for a chat, or null if all are allowed.
+   */
+  getAllowedTools(jid: string): string[] | null {
+    const config = this.getByJid(jid);
+    if (!config || config.allowed_tools === null) return null;
+    try {
+      return JSON.parse(config.allowed_tools) as string[];
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Check if user memory should be injected for a chat.
+   */
+  shouldInjectMemory(jid: string): boolean {
+    const config = this.getByJid(jid);
+    if (!config) return true; // Default: inject
+    return config.inject_user_memory === 1;
   }
 
   isWithinSchedule(jid: string): boolean {

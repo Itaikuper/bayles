@@ -335,6 +335,8 @@ function Whitelist() {
         schedule_enabled: editChat.schedule_enabled ? true : false,
         schedule_start_hour: parseInt(editChat.schedule_start_hour) || 0,
         schedule_end_hour: parseInt(editChat.schedule_end_hour) || 24,
+        allowed_tools: editChat.allowed_tools_parsed,
+        inject_user_memory: editChat.inject_user_memory ? true : false,
       });
       setEditChat(null);
       loadData();
@@ -399,7 +401,10 @@ function Whitelist() {
                       </button>
                     </td>
                     <td>
-                      <button className="btn btn-small btn-primary" onClick={() => setEditChat({...chat})}>
+                      <button className="btn btn-small btn-primary" onClick={() => {
+                        const parsed = chat.allowed_tools ? JSON.parse(chat.allowed_tools) : null;
+                        setEditChat({...chat, allowed_tools_parsed: parsed, inject_user_memory: !!chat.inject_user_memory});
+                      }}>
                         ערוך
                       </button>
                       <button className="btn btn-small btn-danger" onClick={() => removeChat(chat.jid)}>
@@ -541,6 +546,59 @@ function Whitelist() {
                       onChange={e => setEditChat({...editChat, schedule_end_hour: e.target.value})}
                     />
                   </div>
+                </div>
+              )}
+              <hr style={{margin: '12px 0', borderColor: '#333'}} />
+              <h4 style={{margin: '8px 0'}}>פרטיות וכלים</h4>
+              <div className="form-group">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={editChat.inject_user_memory}
+                    onChange={e => setEditChat({...editChat, inject_user_memory: e.target.checked})}
+                  />
+                  הזרקת זיכרון אישי (עובדות שהבוט למד על המשתמש)
+                </label>
+              </div>
+              <div className="form-group">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={editChat.allowed_tools_parsed === null}
+                    onChange={e => setEditChat({
+                      ...editChat,
+                      allowed_tools_parsed: e.target.checked ? null : ['search_hoshaya_directory']
+                    })}
+                  />
+                  כל הכלים מאופשרים
+                </label>
+              </div>
+              {editChat.allowed_tools_parsed !== null && (
+                <div className="form-group" style={{paddingRight: '20px'}}>
+                  {[
+                    {name: 'search_song', label: 'חיפוש שירים'},
+                    {name: 'search_contact', label: 'אנשי קשר'},
+                    {name: 'search_hoshaya_directory', label: 'ספר טלפונים הושעיה'},
+                    {name: 'create_schedule', label: 'תזמון הודעות'},
+                    {name: 'send_message', label: 'שליחת הודעות'},
+                    {name: 'list_calendar_events', label: 'יומן (Google Calendar)'},
+                    {name: 'manage_chore_rotation', label: 'תורנויות'},
+                  ].map(tool => (
+                    <label key={tool.name} style={{display: 'block', margin: '4px 0'}}>
+                      <input
+                        type="checkbox"
+                        checked={(editChat.allowed_tools_parsed || []).includes(tool.name)}
+                        onChange={e => {
+                          const current = editChat.allowed_tools_parsed || [];
+                          const updated = e.target.checked
+                            ? [...current, tool.name]
+                            : current.filter(t => t !== tool.name);
+                          setEditChat({...editChat, allowed_tools_parsed: updated});
+                        }}
+                      />
+                      {tool.label}
+                    </label>
+                  ))}
                 </div>
               )}
             </div>

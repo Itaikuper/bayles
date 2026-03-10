@@ -337,6 +337,17 @@ export function runMigrations() {
         db.prepare('INSERT INTO migrations (name) VALUES (?)').run('012_hoshaya_directory');
         logger.info('Migration 012_hoshaya_directory completed');
     }
+    // Migration 013a: Per-chat privacy controls (allowed_tools + inject_user_memory)
+    const applied013a = db.prepare('SELECT name FROM migrations WHERE name = ?').get('013a_chat_privacy');
+    if (!applied013a) {
+        logger.info('Running migration: 013a_chat_privacy');
+        // allowed_tools: JSON array of tool names allowed in this chat (NULL = all tools allowed)
+        db.exec(`ALTER TABLE chat_configs ADD COLUMN allowed_tools TEXT DEFAULT NULL`);
+        // inject_user_memory: whether to inject per-user memory facts when generating responses
+        db.exec(`ALTER TABLE chat_configs ADD COLUMN inject_user_memory INTEGER DEFAULT 1`);
+        db.prepare('INSERT INTO migrations (name) VALUES (?)').run('013a_chat_privacy');
+        logger.info('Migration 013a_chat_privacy completed');
+    }
     // Migration 013: Chore rotations (family duty scheduling)
     const applied013 = db.prepare('SELECT name FROM migrations WHERE name = ?').get('013_chore_rotations');
     if (!applied013) {

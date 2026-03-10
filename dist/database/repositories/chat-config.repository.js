@@ -70,6 +70,14 @@ export class ChatConfigRepository {
             fields.push('schedule_days = ?');
             values.push(updates.schedule_days);
         }
+        if (updates.allowed_tools !== undefined) {
+            fields.push('allowed_tools = ?');
+            values.push(updates.allowed_tools === null ? null : JSON.stringify(updates.allowed_tools));
+        }
+        if (updates.inject_user_memory !== undefined) {
+            fields.push('inject_user_memory = ?');
+            values.push(updates.inject_user_memory ? 1 : 0);
+        }
         if (fields.length === 0)
             return this.getByJid(jid);
         fields.push("updated_at = datetime('now')");
@@ -89,6 +97,45 @@ export class ChatConfigRepository {
         this.db
             .prepare("UPDATE chat_configs SET enabled = ?, updated_at = datetime('now') WHERE jid = ?")
             .run(enabled ? 1 : 0, jid);
+    }
+    /**
+     * Check if a specific tool is allowed for a chat.
+     * Returns true if allowed_tools is null (all tools allowed) or if the tool is in the list.
+     */
+    isToolAllowed(jid, toolName) {
+        const config = this.getByJid(jid);
+        if (!config || config.allowed_tools === null)
+            return true;
+        try {
+            const tools = JSON.parse(config.allowed_tools);
+            return tools.includes(toolName);
+        }
+        catch {
+            return true; // If JSON is invalid, allow all
+        }
+    }
+    /**
+     * Get the list of allowed tools for a chat, or null if all are allowed.
+     */
+    getAllowedTools(jid) {
+        const config = this.getByJid(jid);
+        if (!config || config.allowed_tools === null)
+            return null;
+        try {
+            return JSON.parse(config.allowed_tools);
+        }
+        catch {
+            return null;
+        }
+    }
+    /**
+     * Check if user memory should be injected for a chat.
+     */
+    shouldInjectMemory(jid) {
+        const config = this.getByJid(jid);
+        if (!config)
+            return true; // Default: inject
+        return config.inject_user_memory === 1;
     }
     isWithinSchedule(jid) {
         const config = this.getByJid(jid);
