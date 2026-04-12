@@ -457,4 +457,48 @@ export function runMigrations(): void {
     db.prepare('INSERT INTO migrations (name) VALUES (?)').run('013_chore_rotations');
     logger.info('Migration 013_chore_rotations completed');
   }
+
+  runGmailMigration(db);
+}
+
+function runGmailMigration(db: ReturnType<typeof getDatabase>): void {
+  const applied014 = db.prepare('SELECT name FROM migrations WHERE name = ?').get('014_gmail');
+  if (applied014) return;
+
+  logger.info('Running migration: 014_gmail');
+
+  const credentialsTable = `
+    CREATE TABLE IF NOT EXISTS gmail_credentials (
+      jid TEXT PRIMARY KEY,
+      refresh_token_enc TEXT NOT NULL,
+      email_address TEXT NOT NULL,
+      scopes TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `;
+  const labelsTable = `
+    CREATE TABLE IF NOT EXISTS gmail_watch_labels (
+      jid TEXT NOT NULL,
+      label_id TEXT NOT NULL,
+      label_name TEXT NOT NULL,
+      PRIMARY KEY (jid, label_id)
+    )
+  `;
+  const seenTable = `
+    CREATE TABLE IF NOT EXISTS gmail_seen_messages (
+      jid TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      notified_at INTEGER NOT NULL,
+      PRIMARY KEY (jid, message_id)
+    )
+  `;
+
+  db.exec(credentialsTable);
+  db.exec(labelsTable);
+  db.exec(seenTable);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_gmail_seen_notified ON gmail_seen_messages(notified_at)');
+
+  db.prepare('INSERT INTO migrations (name) VALUES (?)').run('014_gmail');
+  logger.info('Migration 014_gmail completed');
 }

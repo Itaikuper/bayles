@@ -5,4 +5,5 @@ import { SchedulerService } from '../../services/scheduler.service.js';
 import { BotControlService } from '../../services/bot-control.service.js';
 import { BirthdayService } from '../../services/birthday.service.js';
 import { CalendarService } from '../../services/calendar.service.js';
-export declare function createRoutes(whatsapp: WhatsAppService, gemini: GeminiService, scheduler: SchedulerService, botControl: BotControlService, birthdayService: BirthdayService, calendarService?: CalendarService): Router;
+import { GmailService } from '../../services/gmail.service.js';
+export declare function createRoutes(whatsapp: WhatsAppService, gemini: GeminiService, scheduler: SchedulerService, botControl: BotControlService, birthdayService: BirthdayService, calendarService?: CalendarService, gmailService?: GmailService): Router;

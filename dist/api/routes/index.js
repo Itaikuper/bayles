@@ -11,7 +11,8 @@ import { createTenantsRoutes } from './tenants.routes.js';
 import { createContactsRoutes } from './contacts.routes.js';
 import { createSongsRoutes } from './songs.routes.js';
 import { createCalendarRoutes } from './calendar.routes.js';
-export function createRoutes(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService) {
+import { createGmailRoutes } from './gmail.routes.js';
+export function createRoutes(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService, gmailService) {
     const router = Router();
     router.use('/groups', createGroupsRoutes(whatsapp));
     router.use('/scheduler', createSchedulerRoutes(scheduler));
@@ -26,6 +27,9 @@ export function createRoutes(whatsapp, gemini, scheduler, botControl, birthdaySe
     router.use('/songs', createSongsRoutes());
     if (calendarService) {
         router.use('/calendar', createCalendarRoutes(calendarService));
+    }
+    if (gmailService) {
+        router.use('/gmail', createGmailRoutes(gmailService));
     }
     return router;
 }

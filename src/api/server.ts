@@ -7,6 +7,7 @@ import { SchedulerService } from '../services/scheduler.service.js';
 import { BotControlService } from '../services/bot-control.service.js';
 import { BirthdayService } from '../services/birthday.service.js';
 import { CalendarService } from '../services/calendar.service.js';
+import { GmailService } from '../services/gmail.service.js';
 import { createRoutes } from './routes/index.js';
 import { logger } from '../utils/logger.js';
 
@@ -18,7 +19,8 @@ export function createApiServer(
   scheduler: SchedulerService,
   botControl: BotControlService,
   birthdayService: BirthdayService,
-  calendarService?: CalendarService
+  calendarService?: CalendarService,
+  gmailService?: GmailService
 ): Express {
   const app = express();
 
@@ -40,7 +42,7 @@ export function createApiServer(
   app.use(express.static(path.join(__dirname, '../../web')));
 
   // API routes - inject services
-  app.use('/api', createRoutes(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService));
+  app.use('/api', createRoutes(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService, gmailService));
 
   // SPA fallback - serve index.html for non-API routes
   app.use((req: Request, res: Response, next: NextFunction) => {

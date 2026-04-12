@@ -5,6 +5,7 @@ import { SchedulerService } from '../../services/scheduler.service.js';
 import { BotControlService } from '../../services/bot-control.service.js';
 import { BirthdayService } from '../../services/birthday.service.js';
 import { CalendarService } from '../../services/calendar.service.js';
+import { GmailService } from '../../services/gmail.service.js';
 import { createGroupsRoutes } from './groups.routes.js';
 import { createSchedulerRoutes } from './scheduler.routes.js';
 import { createMessagesRoutes } from './messages.routes.js';
@@ -17,6 +18,7 @@ import { createTenantsRoutes } from './tenants.routes.js';
 import { createContactsRoutes } from './contacts.routes.js';
 import { createSongsRoutes } from './songs.routes.js';
 import { createCalendarRoutes } from './calendar.routes.js';
+import { createGmailRoutes } from './gmail.routes.js';
 
 export function createRoutes(
   whatsapp: WhatsAppService,
@@ -24,7 +26,8 @@ export function createRoutes(
   scheduler: SchedulerService,
   botControl: BotControlService,
   birthdayService: BirthdayService,
-  calendarService?: CalendarService
+  calendarService?: CalendarService,
+  gmailService?: GmailService
 ): Router {
   const router = Router();
 
@@ -41,6 +44,9 @@ export function createRoutes(
   router.use('/songs', createSongsRoutes());
   if (calendarService) {
     router.use('/calendar', createCalendarRoutes(calendarService));
+  }
+  if (gmailService) {
+    router.use('/gmail', createGmailRoutes(gmailService));
   }
 
   return router;

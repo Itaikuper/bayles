@@ -5,6 +5,7 @@ import { SchedulerService } from '../services/scheduler.service.js';
 import { BotControlService } from '../services/bot-control.service.js';
 import { BirthdayService } from '../services/birthday.service.js';
 import { CalendarService } from '../services/calendar.service.js';
+import { GmailService } from '../services/gmail.service.js';
 import { ChoreRotationService } from '../services/chore-rotation.service.js';
 export declare class MessageHandler {
     private whatsapp;
@@ -14,12 +15,13 @@ export declare class MessageHandler {
     private birthdayService;
     private calendarService?;
     private choreRotationService?;
+    private gmailService?;
     private voiceModeJids;
     private sendMessageCooldowns;
     private readonly SEND_MESSAGE_COOLDOWN_MS;
     private mediationMessages;
     private readonly MEDIATION_TTL_MS;
-    constructor(whatsapp: WhatsAppService, gemini: GeminiService, scheduler: SchedulerService, botControl: BotControlService, birthdayService: BirthdayService, calendarService?: CalendarService | undefined, choreRotationService?: ChoreRotationService | undefined);
+    constructor(whatsapp: WhatsAppService, gemini: GeminiService, scheduler: SchedulerService, botControl: BotControlService, birthdayService: BirthdayService, calendarService?: CalendarService | undefined, choreRotationService?: ChoreRotationService | undefined, gmailService?: GmailService | undefined);
     handle(message: proto.IWebMessageInfo): Promise<void>;
     private extractText;
     private handleAudioMessage;
@@ -83,4 +85,5 @@ export declare class MessageHandler {
     private extractImagePrompt;
     private handleImageGeneration;
     private getHelpText;
+    private handleGmailFunction;
 }

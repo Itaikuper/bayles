@@ -5,5 +5,6 @@ import { SchedulerService } from '../services/scheduler.service.js';
 import { BotControlService } from '../services/bot-control.service.js';
 import { BirthdayService } from '../services/birthday.service.js';
 import { CalendarService } from '../services/calendar.service.js';
-export declare function createApiServer(whatsapp: WhatsAppService, gemini: GeminiService, scheduler: SchedulerService, botControl: BotControlService, birthdayService: BirthdayService, calendarService?: CalendarService): Express;
+import { GmailService } from '../services/gmail.service.js';
+export declare function createApiServer(whatsapp: WhatsAppService, gemini: GeminiService, scheduler: SchedulerService, botControl: BotControlService, birthdayService: BirthdayService, calendarService?: CalendarService, gmailService?: GmailService): Express;
 export declare function startApiServer(app: Express, port?: number): void;

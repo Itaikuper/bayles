@@ -18,9 +18,30 @@ npm run import-songs # Bulk import songs from src/scripts/import-songs.ts
 
 Production deployment uses PM2 via `ecosystem.config.cjs` (300MB memory limit). There are no tests or linting configured.
 
+## Google Cloud & API Configuration
+
+**GCP Project**: `gen-lang-client-0072875231`
+
+### Required APIs (must be enabled in Google Console)
+
+| API | Service | Auth Method | Used For |
+|-----|---------|-------------|----------|
+| Generative Language API | `generativelanguage.googleapis.com` | API key (`GEMINI_API_KEY` env var) | Gemini AI: chat, memory extraction, TTS, image generation |
+| Google Calendar API | `calendar-json.googleapis.com` | Service account (`service-account.json`) | Calendar events, daily summaries, reminders |
+| Compute Engine API | `compute.googleapis.com` | — | VM hosting |
+
+### API Key Restrictions
+
+The Gemini API key should be restricted to **Generative Language API** only. If you regenerate or modify keys in Google Console, update the server `.env` — the key there must match an active key in the project.
+
+**Service account**: `bayles-calendar@gen-lang-client-0072875231.iam.gserviceaccount.com` (calendar scope only)
+
+### Gmail (private personal assistant)
+
+Single-owner OAuth2. Restricted to `GMAIL_OWNER_JID`. Scopes: `gmail.readonly` + `gmail.modify` (NO `gmail.send` — the bot only creates drafts). Tables: `gmail_credentials` (encrypted refresh token), `gmail_watch_labels`, `gmail_seen_messages`. Poller every 7 min (`GMAIL_POLL_CRON`) notifies WhatsApp about new unread emails carrying a watched Gmail label. Link once via `GET /api/gmail/oauth/start?jid=<owner_jid>` → open returned URL → consent → callback stores encrypted token.
+
 ## Production Server (Google Compute Engine)
 
-- **GCP Project**: `gen-lang-client-0072875231`
 - **VM Instance**: `instance-20260204-215257`
 - **Zone**: `us-central1-c`
 - **Server path**: `/home/itaikuper/bayles`

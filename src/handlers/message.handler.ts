@@ -5,6 +5,7 @@ import { SchedulerService } from '../services/scheduler.service.js';
 import { BotControlService } from '../services/bot-control.service.js';
 import { BirthdayService } from '../services/birthday.service.js';
 import { CalendarService } from '../services/calendar.service.js';
+import { GmailService } from '../services/gmail.service.js';
 import { ChoreRotationService } from '../services/chore-rotation.service.js';
 import { ScheduleRepository } from '../database/repositories/schedule.repository.js';
 import { config } from '../config/env.js';
@@ -29,7 +30,8 @@ export class MessageHandler {
     private botControl: BotControlService,
     private birthdayService: BirthdayService,
     private calendarService?: CalendarService,
-    private choreRotationService?: ChoreRotationService
+    private choreRotationService?: ChoreRotationService,
+    private gmailService?: GmailService
   ) {}
 
   async handle(message: proto.IWebMessageInfo): Promise<void> {
@@ -229,6 +231,8 @@ export class MessageHandler {
           actionSummary = await this.handleSendMessage(jid, response.functionCall.args as unknown as SendMessageArgs, message, senderName);
         } else if (response.functionCall.name === 'manage_chore_rotation') {
           actionSummary = await this.handleChoreRotation(jid, response.functionCall.args as unknown as ChoreRotationArgs, message);
+        } else if (response.functionCall.name?.startsWith('gmail_')) {
+          actionSummary = await this.handleGmailFunction(jid, response.functionCall.name, response.functionCall.args as Record<string, unknown>, message);
         } else {
           // Unknown function call - log and ignore
           logger.warn(`Unknown function call: ${response.functionCall.name}`);
@@ -2001,5 +2005,77 @@ ${config.botPrefix} Tell me a joke
 /image a cat sitting on the moon
 ייצר תמונה של חתול על הירח
 /birthdays add איתי 5 פבר יהודה 25 מרץ`;
+  }
+
+  private async handleGmailFunction(
+    jid: string,
+    name: string,
+    args: Record<string, unknown>,
+    message: proto.IWebMessageInfo
+  ): Promise<string | null> {
+    if (!this.gmailService || !this.gmailService.isOwner(jid)) {
+      await this.whatsapp.sendReply(jid, 'Gmail tools are disabled for this chat.', message);
+      return null;
+    }
+    try {
+      switch (name) {
+        case 'gmail_list_recent_emails': {
+          const list = await this.gmailService.listRecentEmails(jid, {
+            labelName: args.labelName as string | undefined,
+            query: args.query as string | undefined,
+            max: args.max as number | undefined,
+          });
+          if (list.length === 0) {
+            await this.whatsapp.sendReply(jid, 'לא נמצאו מיילים.', message);
+            return '[gmail_list_recent_emails: 0 results]';
+          }
+          const text = list.map(e => `• *${e.subject || '(ללא נושא)'}*\n  מאת: ${e.from}\n  ${e.snippet}\n  id: ${e.id}`).join('\n\n');
+          await this.whatsapp.sendReply(jid, text, message);
+          return `[gmail_list_recent_emails: ${list.length} results]`;
+        }
+        case 'gmail_read_email': {
+          const msg = await this.gmailService.readEmail(jid, args.messageId as string);
+          const body = msg.body.length > 1500 ? msg.body.slice(0, 1500) + '…' : msg.body;
+          const text = `📧 *${msg.subject || '(ללא נושא)'}*\nמאת: ${msg.from}\n${msg.date}\n\n${body}`;
+          await this.whatsapp.sendReply(jid, text, message);
+          return `[gmail_read_email: ${args.messageId}]`;
+        }
+        case 'gmail_draft_reply': {
+          const res = await this.gmailService.createDraftReply(jid, args.messageId as string, args.body as string);
+          await this.whatsapp.sendReply(jid, `✅ טיוטה נוצרה ב־Gmail (draftId: ${res.draftId}). ההודעה לא נשלחה — בדוק ב־Drafts ושלח משם.`, message);
+          return `[gmail_draft_reply created draftId=${res.draftId}]`;
+        }
+        case 'gmail_add_watch_label': {
+          const res = await this.gmailService.addWatchLabel(jid, args.labelName as string);
+          if (!res.ok) {
+            await this.whatsapp.sendReply(jid, res.reason || 'לא הצלחתי להוסיף תווית.', message);
+            return `[gmail_add_watch_label: failed]`;
+          }
+          await this.whatsapp.sendReply(jid, `✅ עוקב אחרי התווית "${args.labelName}". אני אבדוק כל 7 דק' ואודיע על מיילים חדשים.`, message);
+          return `[gmail_add_watch_label: ${args.labelName}]`;
+        }
+        case 'gmail_remove_watch_label': {
+          const n = await this.gmailService.removeWatchLabel(jid, args.labelName as string);
+          await this.whatsapp.sendReply(jid, n > 0 ? `🗑 הפסקתי לעקוב אחרי "${args.labelName}".` : `התווית "${args.labelName}" לא הייתה במעקב.`, message);
+          return `[gmail_remove_watch_label: ${n}]`;
+        }
+        case 'gmail_list_watch_labels': {
+          const labels = this.gmailService.listWatchLabels(jid);
+          const text = labels.length === 0
+            ? 'אין תוויות במעקב.'
+            : 'תוויות במעקב:\n' + labels.map(l => `• ${l.label_name}`).join('\n');
+          await this.whatsapp.sendReply(jid, text, message);
+          return `[gmail_list_watch_labels: ${labels.length}]`;
+        }
+        default:
+          logger.warn(`Unhandled gmail function: ${name}`);
+          return null;
+      }
+    } catch (err) {
+      logger.error(`Gmail function ${name} failed:`, err);
+      const errMsg = err instanceof Error ? err.message : 'unknown error';
+      await this.whatsapp.sendReply(jid, `שגיאה ב-${name}: ${errMsg}`, message);
+      return `[${name}: error]`;
+    }
   }
 }

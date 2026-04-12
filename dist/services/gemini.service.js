@@ -285,6 +285,63 @@ const deleteCalendarEventDeclaration = {
         required: ['searchQuery', 'searchDate'],
     },
 };
+// --- Gmail (private, owner-JID only) ---
+const gmailListRecentDeclaration = {
+    name: 'gmail_list_recent_emails',
+    description: 'List recent Gmail emails. Use when the owner asks to see/check their inbox, list new mail, see mail from a label, or search. Keywords: מיילים, תיבה, מה חדש במייל, בדוק מייל, inbox, emails.',
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            labelName: { type: Type.STRING, description: 'Optional label name to filter by (must be a watched label).' },
+            query: { type: Type.STRING, description: 'Optional Gmail search query (e.g. "from:boss@x.com newer_than:2d").' },
+            max: { type: Type.NUMBER, description: 'Max number of results (default 10, max 20).' },
+        },
+    },
+};
+const gmailReadEmailDeclaration = {
+    name: 'gmail_read_email',
+    description: 'Read the full body of a specific Gmail message by its id. Use when you need the content before summarizing or drafting a reply.',
+    parameters: {
+        type: Type.OBJECT,
+        properties: { messageId: { type: Type.STRING, description: 'Gmail message id.' } },
+        required: ['messageId'],
+    },
+};
+const gmailDraftReplyDeclaration = {
+    name: 'gmail_draft_reply',
+    description: 'Create a DRAFT reply to a Gmail message (never sends). Use when the owner asks to draft/compose a response. Keywords: נסח תשובה, ענה, טיוטה, draft reply, compose.',
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            messageId: { type: Type.STRING, description: 'Gmail id of the message to reply to.' },
+            body: { type: Type.STRING, description: 'Body text of the reply, in the requested language (usually Hebrew).' },
+        },
+        required: ['messageId', 'body'],
+    },
+};
+const gmailAddWatchLabelDeclaration = {
+    name: 'gmail_add_watch_label',
+    description: 'Start monitoring a Gmail label for new emails. The label must already exist in Gmail. Keywords: עקוב אחרי תווית, תתחיל לעקוב, watch label.',
+    parameters: {
+        type: Type.OBJECT,
+        properties: { labelName: { type: Type.STRING } },
+        required: ['labelName'],
+    },
+};
+const gmailRemoveWatchLabelDeclaration = {
+    name: 'gmail_remove_watch_label',
+    description: 'Stop monitoring a Gmail label. Keywords: הפסק לעקוב, unwatch, remove label.',
+    parameters: {
+        type: Type.OBJECT,
+        properties: { labelName: { type: Type.STRING } },
+        required: ['labelName'],
+    },
+};
+const gmailListWatchLabelsDeclaration = {
+    name: 'gmail_list_watch_labels',
+    description: 'List which Gmail labels are being monitored. Keywords: אילו תוויות, which labels.',
+    parameters: { type: Type.OBJECT, properties: {} },
+};
 export class GeminiService {
     ai;
     conversationHistory = new Map();
@@ -392,6 +449,14 @@ Messages in [brackets] in conversation history are factual records of actions yo
                 functionDeclarations.push(sendMessageDeclaration);
             if (isChoreRequest && isAllowed('manage_chore_rotation'))
                 functionDeclarations.push(manageChoreRotationDeclaration);
+            // Gmail tools: owner JID only. senderJid check mirrors the service-side guard.
+            const isGmailOwner = Boolean(config.gmailOwnerJid) && (senderJid === config.gmailOwnerJid || jid === config.gmailOwnerJid);
+            if (isGmailOwner) {
+                const gmailKeywords = /מייל|מיילים|gmail|email|inbox|תיבת דואר|תווית|טיוטה|נסח תשובה|draft|label/i;
+                if (gmailKeywords.test(userMessage)) {
+                    functionDeclarations.push(gmailListRecentDeclaration, gmailReadEmailDeclaration, gmailDraftReplyDeclaration, gmailAddWatchLabelDeclaration, gmailRemoveWatchLabelDeclaration, gmailListWatchLabelsDeclaration);
+                }
+            }
             const isFunctionCallRequest = functionDeclarations.length > 0;
             const tools = isFunctionCallRequest
                 ? [{ functionDeclarations }]

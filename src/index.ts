@@ -5,10 +5,11 @@ import { SchedulerService } from './services/scheduler.service.js';
 import { BirthdayService } from './services/birthday.service.js';
 import { CompactionService } from './services/compaction.service.js';
 import { CalendarService } from './services/calendar.service.js';
+import { GmailService } from './services/gmail.service.js';
 import { ChoreRotationService } from './services/chore-rotation.service.js';
 import { getBotControlService } from './services/bot-control.service.js';
 import { MessageHandler } from './handlers/message.handler.js';
-import { validateConfig, config } from './config/env.js';
+import { validateConfig, config, isGmailEnabled as checkGmailEnabled } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { createApiServer, startApiServer } from './api/server.js';
 import { runMigrations } from './database/migrate.js';
@@ -78,8 +79,22 @@ async function main() {
     const choreRotationService = new ChoreRotationService(whatsapp, gemini);
     choreRotationService.start();
 
+    // Initialize Gmail service (optional - only if GMAIL_* env vars are set)
+    let gmailService: GmailService | undefined;
+    if (checkGmailEnabled()) {
+      try {
+        gmailService = new GmailService(whatsapp, gemini);
+        await gmailService.start();
+      } catch (err) {
+        logger.warn('GmailService failed to initialize (gmail features disabled):', err);
+        gmailService = undefined;
+      }
+    } else {
+      logger.info('Gmail env vars not set, Gmail features disabled');
+    }
+
     // Initialize message handler
-    const messageHandler = new MessageHandler(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService, choreRotationService);
+    const messageHandler = new MessageHandler(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService, choreRotationService, gmailService);
 
     // Auto-whitelist family group members (group + private DMs)
     let familyGroupJid: string | null = null;
@@ -149,7 +164,7 @@ async function main() {
 
     // Start API server (dashboard)
     const apiPort = parseInt(process.env.API_PORT || '3000');
-    const app = createApiServer(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService);
+    const app = createApiServer(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService, gmailService);
     startApiServer(app, apiPort);
 
     logger.info('Bot is running!');
@@ -206,6 +221,7 @@ async function main() {
       birthdayService.stop();
       compactionService.stop();
       calendarService?.stop();
+      gmailService?.stop();
       choreRotationService.stop();
       await pool.disconnectAll();
       closeDatabase();

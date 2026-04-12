@@ -9,5 +9,12 @@ export declare const config: {
     googleServiceAccountPath: string;
     calendarDailySummaryCron: string;
     calendarTimezone: string;
+    gmailClientId: string;
+    gmailClientSecret: string;
+    gmailRedirectUri: string;
+    gmailOwnerJid: string;
+    gmailEncryptionKey: string;
+    gmailPollCron: string;
 };
+export declare function isGmailEnabled(): boolean;
 export declare function validateConfig(): void;
