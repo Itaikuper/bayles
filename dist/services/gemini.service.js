@@ -405,9 +405,13 @@ export class GeminiService {
             const today = new Date();
             const dateContext = `Today is ${today.toISOString().split('T')[0]} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][today.getDay()]}).`;
             // Capability context so the model knows what it can do and trusts action records
+            const isGmailOwnerForContext = Boolean(config.gmailOwnerJid) && (senderJid === config.gmailOwnerJid || jid === config.gmailOwnerJid);
+            const gmailCapabilityLine = isGmailOwnerForContext
+                ? `\nYou DO have access to this user's Gmail inbox (read-only + draft creation). Use gmail_list_recent_emails to check mail, gmail_read_email to read a message, gmail_draft_reply to compose a draft (never sends). CRITICAL: if the user asks anything about their email/inbox/mail ("מה המצב במייל", "יש לי מיילים חדשים?", "check my inbox", "נסח תשובה ל...") you MUST call the appropriate gmail_* function — never answer "I don't have access". You cannot send email, only draft.`
+                : '';
             const capabilityContext = `
 You have real capabilities through function calling: send messages to other people (send_message), schedule messages (create_schedule), search songs (search_song), search contacts (search_contact), search Hoshaya village phone directory (search_hoshaya_directory), manage calendar events, and manage family chore rotations (manage_chore_rotation).
-CRITICAL: For ANY phone number or contact lookup, you MUST call search_hoshaya_directory. NEVER answer phone queries from memory or conversation history. You do NOT know any phone numbers - always call the function.
+CRITICAL: For ANY phone number or contact lookup, you MUST call search_hoshaya_directory. NEVER answer phone queries from memory or conversation history. You do NOT know any phone numbers - always call the function.${gmailCapabilityLine}
 Messages in [brackets] in conversation history are factual records of actions you performed. Trust them completely — if it says [שלחתי הודעה ל...], you DID send that message. Never deny or contradict these records.`;
             // Only enable function calling when message matches known patterns
             // Otherwise use googleSearch for regular queries (weather, current events, etc.)
@@ -452,7 +456,7 @@ Messages in [brackets] in conversation history are factual records of actions yo
             // Gmail tools: owner JID only. senderJid check mirrors the service-side guard.
             const isGmailOwner = Boolean(config.gmailOwnerJid) && (senderJid === config.gmailOwnerJid || jid === config.gmailOwnerJid);
             if (isGmailOwner) {
-                const gmailKeywords = /מייל|מיילים|gmail|email|inbox|תיבת דואר|תווית|טיוטה|נסח תשובה|draft|label/i;
+                const gmailKeywords = /מייל|מיילים|במייל|gmail|email|inbox|תיבת דואר|דואר|דוא"ל|תווית|טיוטה|נסח תשובה|draft|label|לקרוא|סכם את|תענה ל|השב ל/i;
                 if (gmailKeywords.test(userMessage)) {
                     functionDeclarations.push(gmailListRecentDeclaration, gmailReadEmailDeclaration, gmailDraftReplyDeclaration, gmailAddWatchLabelDeclaration, gmailRemoveWatchLabelDeclaration, gmailListWatchLabelsDeclaration);
                 }
