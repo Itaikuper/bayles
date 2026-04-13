@@ -27,6 +27,23 @@ export declare class GeminiService {
      */
     generateScheduledContent(prompt: string): Promise<string>;
     /**
+     * Parse a Hebrew/English date+time phrase into structured ISO date/times.
+     * `mode = 'range'` returns a startDate..endDate (whole-day range).
+     * `mode = 'point'` returns startDateTime + endDateTime (with duration).
+     */
+    parseDateTimePhrase(opts: {
+        mode: 'range' | 'point';
+        datePhrase?: string;
+        timePhrase?: string;
+        durationPhrase?: string;
+        todayIso: string;
+        timezone: string;
+    }): Promise<{
+        startIso: string;
+        endIso: string;
+        note?: string;
+    }>;
+    /**
      * Resolve a free-form recipient hint ("אסתר", "ליתי קופרס", "esther@...") to an email.
      * Uses the owner's core memory + people notes. Returns null if unknown.
      */

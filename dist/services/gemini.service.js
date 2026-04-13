@@ -1030,6 +1030,64 @@ Messages in [brackets] in conversation history are factual records of actions yo
         }
     }
     /**
+     * Parse a Hebrew/English date+time phrase into structured ISO date/times.
+     * `mode = 'range'` returns a startDate..endDate (whole-day range).
+     * `mode = 'point'` returns startDateTime + endDateTime (with duration).
+     */
+    async parseDateTimePhrase(opts) {
+        const { mode, datePhrase, timePhrase, durationPhrase, todayIso, timezone } = opts;
+        const prompt = `You parse a Hebrew/English natural-language date phrase into ISO date strings.
+
+Today is: ${todayIso}
+Timezone: ${timezone}
+Mode: ${mode === 'range' ? 'date RANGE for listing events' : 'specific time POINT for an event'}
+
+Phrases:
+- date_phrase: "${datePhrase || ''}"
+${mode === 'point' ? `- time_phrase: "${timePhrase || ''}"\n- duration_phrase: "${durationPhrase || ''}" (default: 60 minutes)` : ''}
+
+Rules:
+- "היום" / "today" → today's date.
+- "מחר" / "tomorrow" → tomorrow.
+- "השבוע" / "this week" → today through Saturday (Israeli week ends Saturday).
+- "השבוע הבא" / "next week" → next Sunday through following Saturday.
+- "החודש" / "this month" → today through end of month.
+- Specific dates ("ב-15 לחודש", "April 20") → resolve to YYYY-MM-DD using current year unless stated.
+- Time phrases like "ב21:30", "21:30", "ב9 בבוקר", "10 בבוקר" → 24h time.
+- "9 בערב" / "9pm" → 21:00. "9 בבוקר" / "9am" → 09:00.
+- If date_phrase is empty for a 'point' mode, assume today.
+- If time_phrase is empty for 'point', assume 09:00 and add a note.
+- Duration: "שעה" → 60, "30 דקות" → 30, "שעתיים" → 120.
+
+For RANGE mode return startIso (start of first day, YYYY-MM-DDT00:00:00) and endIso (start of day AFTER last day).
+For POINT mode return startIso (event start, full ISO with offset omitted — caller adds tz) and endIso (event end).
+
+Return JSON: { startIso, endIso, note }. Note is a one-line warning if you had to guess (e.g., "no time given, assumed 09:00"); empty string otherwise.`;
+        const response = await this.ai.models.generateContent({
+            model: config.geminiModel,
+            contents: prompt,
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        startIso: { type: Type.STRING, description: 'Start ISO timestamp.' },
+                        endIso: { type: Type.STRING, description: 'End ISO timestamp.' },
+                        note: { type: Type.STRING, description: 'Optional one-line warning, or empty string.' },
+                    },
+                    required: ['startIso', 'endIso', 'note'],
+                },
+                temperature: 0,
+            },
+        });
+        const parsed = JSON.parse(response.text?.trim() || '{}');
+        return {
+            startIso: (parsed.startIso || '').trim(),
+            endIso: (parsed.endIso || '').trim(),
+            note: parsed.note?.trim() || undefined,
+        };
+    }
+    /**
      * Resolve a free-form recipient hint ("אסתר", "ליתי קופרס", "esther@...") to an email.
      * Uses the owner's core memory + people notes. Returns null if unknown.
      */

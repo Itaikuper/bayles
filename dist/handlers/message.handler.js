@@ -9,6 +9,8 @@ import { getHoshayaDirectoryRepository } from '../database/repositories/hoshaya-
 import { getCalendarLinkRepository } from '../database/repositories/calendar-link.repository.js';
 import { getIntentService } from '../services/intent.service.js';
 import { runEmailNewWorkflow } from '../services/workflows/email-new.workflow.js';
+import { runCalendarListWorkflow } from '../services/workflows/calendar-list.workflow.js';
+import { runCalendarCreateWorkflow } from '../services/workflows/calendar-create.workflow.js';
 export class MessageHandler {
     whatsapp;
     gemini;
@@ -162,13 +164,31 @@ export class MessageHandler {
         try {
             // Owner-mode workflow routing: deterministic scripts for well-defined verbs.
             // Falls through to the existing agent-style dispatch for anything else.
-            if (this.gemini.isOwnerMode(jid, sender || undefined) && this.gmailService) {
+            if (this.gemini.isOwnerMode(jid, sender || undefined)) {
                 const classified = await getIntentService().classify(cleanText);
                 logger.info(`[intent] ${classified.intent} — ${classified.reasoning || ''} slots=${JSON.stringify(classified.slots)}`);
-                if (classified.intent === 'email_new') {
+                if (classified.intent === 'email_new' && this.gmailService) {
                     const handled = await runEmailNewWorkflow(jid, classified.slots, message, {
                         gemini: this.gemini,
                         gmail: this.gmailService,
+                        whatsapp: this.whatsapp,
+                    });
+                    if (handled)
+                        return;
+                }
+                if (classified.intent === 'calendar_list' && this.calendarService) {
+                    const handled = await runCalendarListWorkflow(jid, classified.slots, message, {
+                        gemini: this.gemini,
+                        calendar: this.calendarService,
+                        whatsapp: this.whatsapp,
+                    });
+                    if (handled)
+                        return;
+                }
+                if (classified.intent === 'calendar_create' && this.calendarService) {
+                    const handled = await runCalendarCreateWorkflow(jid, classified.slots, message, {
+                        gemini: this.gemini,
+                        calendar: this.calendarService,
                         whatsapp: this.whatsapp,
                     });
                     if (handled)

@@ -1,4 +1,5 @@
 import { getDatabase } from '../db.js';
+import { logger } from '../../utils/logger.js';
 let instance = null;
 export function getCalendarLinkRepository() {
     if (!instance) {
@@ -15,9 +16,28 @@ export class CalendarLinkRepository {
     }
     findDefaultByJid(jid, tenantId = 'default') {
         const db = getDatabase();
-        return db
-            .prepare('SELECT * FROM calendar_links WHERE jid = ? AND tenant_id = ? AND is_default = 1 LIMIT 1')
-            .get(jid, tenantId);
+        const rows = db
+            .prepare('SELECT * FROM calendar_links WHERE jid = ? AND tenant_id = ? AND is_default = 1 ORDER BY id DESC')
+            .all(jid, tenantId);
+        if (rows.length > 1) {
+            logger.warn(`[calendar_links] ${rows.length} rows marked is_default=1 for jid=${jid}; returning most recent (id=${rows[0].id}, calendar_id=${rows[0].calendar_id}).`);
+        }
+        return rows[0];
+    }
+    /**
+     * Atomically set a single default calendar for a JID: zeroes any other
+     * defaults for that JID first, then sets the chosen row.
+     */
+    setDefault(jid, calendarId, tenantId = 'default') {
+        const db = getDatabase();
+        const txn = db.transaction(() => {
+            db.prepare('UPDATE calendar_links SET is_default = 0 WHERE jid = ? AND tenant_id = ?').run(jid, tenantId);
+            const res = db
+                .prepare('UPDATE calendar_links SET is_default = 1 WHERE jid = ? AND tenant_id = ? AND calendar_id = ?')
+                .run(jid, tenantId, calendarId);
+            return res.changes > 0;
+        });
+        return txn();
     }
     findDailySummaryLinks(tenantId = 'default') {
         const db = getDatabase();
@@ -72,6 +92,20 @@ export class CalendarLinkRepository {
         }
         if (setClauses.length === 0)
             return false;
+        // If the caller is setting is_default=1, atomically clear any other defaults
+        // for the same JID first so we never end up with multiple defaults.
+        if (fields.is_default === 1) {
+            const target = db.prepare('SELECT jid, tenant_id FROM calendar_links WHERE id = ?').get(id);
+            if (target) {
+                const txn = db.transaction(() => {
+                    db.prepare('UPDATE calendar_links SET is_default = 0 WHERE jid = ? AND tenant_id = ? AND id != ?').run(target.jid, target.tenant_id, id);
+                    values.push(id);
+                    return db.prepare(`UPDATE calendar_links SET ${setClauses.join(', ')} WHERE id = ?`).run(...values);
+                });
+                const res = txn();
+                return res.changes > 0;
+            }
+        }
         values.push(id);
         const result = db
             .prepare(`UPDATE calendar_links SET ${setClauses.join(', ')} WHERE id = ?`)

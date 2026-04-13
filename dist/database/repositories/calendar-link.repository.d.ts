@@ -13,6 +13,11 @@ export declare function getCalendarLinkRepository(): CalendarLinkRepository;
 export declare class CalendarLinkRepository {
     findByJid(jid: string, tenantId?: string): CalendarLinkRecord[];
     findDefaultByJid(jid: string, tenantId?: string): CalendarLinkRecord | undefined;
+    /**
+     * Atomically set a single default calendar for a JID: zeroes any other
+     * defaults for that JID first, then sets the chosen row.
+     */
+    setDefault(jid: string, calendarId: string, tenantId?: string): boolean;
     findDailySummaryLinks(tenantId?: string): CalendarLinkRecord[];
     findReminderLinks(tenantId?: string): CalendarLinkRecord[];
     getAll(tenantId?: string): CalendarLinkRecord[];
