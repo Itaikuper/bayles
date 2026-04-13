@@ -23,12 +23,17 @@ export async function runCalendarListWorkflow(jid, slots, message, deps) {
     const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: config.calendarTimezone });
     let startIso;
     let endIso;
-    if (!slots.date_phrase || /^(today|היום)$/i.test(slots.date_phrase.trim())) {
+    const phrase = slots.date_phrase?.trim();
+    if (!phrase || /^(today|היום)$/i.test(phrase)) {
         // Fast path: today.
         startIso = `${todayIso}T00:00:00`;
-        const tomorrow = new Date(`${todayIso}T00:00:00`);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        endIso = `${tomorrow.toISOString().slice(0, 10)}T00:00:00`;
+        endIso = `${addDaysIso(todayIso, 1)}T00:00:00`;
+    }
+    else if (/^(מחר|tomorrow)$/i.test(phrase)) {
+        // Fast path: tomorrow.
+        const t = addDaysIso(todayIso, 1);
+        startIso = `${t}T00:00:00`;
+        endIso = `${addDaysIso(todayIso, 2)}T00:00:00`;
     }
     else {
         const parsed = await gemini.parseDateTimePhrase({
@@ -81,6 +86,15 @@ export async function runCalendarListWorkflow(jid, slots, message, deps) {
     const headerLine = `📅 אירועים ${label}:\n\n`;
     await whatsapp.sendReply(jid, headerLine + sections.join('\n\n'), message);
     return true;
+}
+/**
+ * Add `days` to a YYYY-MM-DD string and return another YYYY-MM-DD string.
+ * Calendar arithmetic in UTC to avoid local-vs-UTC slice bugs.
+ */
+function addDaysIso(iso, days) {
+    const [y, m, d] = iso.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d + days));
+    return dt.toISOString().slice(0, 10);
 }
 function pickCalendars(links, hint) {
     if (!hint)
