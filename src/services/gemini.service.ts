@@ -325,7 +325,7 @@ const gmailReadEmailDeclaration: FunctionDeclaration = {
 
 const gmailDraftReplyDeclaration: FunctionDeclaration = {
   name: 'gmail_draft_reply',
-  description: 'Create a DRAFT reply to a Gmail message (never sends). Use when the owner asks to draft/compose a response. Keywords: נסח תשובה, ענה, טיוטה, draft reply, compose.',
+  description: 'Create a DRAFT reply to an EXISTING Gmail message (never sends). Use when the owner asks to reply/respond to a mail. Keywords: נסח תשובה, ענה, השב, draft reply.',
   parameters: {
     type: Type.OBJECT,
     properties: {
@@ -333,6 +333,20 @@ const gmailDraftReplyDeclaration: FunctionDeclaration = {
       body: { type: Type.STRING, description: 'Body text of the reply, in the requested language (usually Hebrew).' },
     },
     required: ['messageId', 'body'],
+  },
+};
+
+const gmailDraftNewDeclaration: FunctionDeclaration = {
+  name: 'gmail_draft_new',
+  description: 'Create a DRAFT of a brand-new email (not a reply; no existing thread). Never sends. Use when the owner asks to compose/draft a new mail to someone. Keywords: נסח מייל, תכתוב מייל חדש, טיוטה חדשה, שלח מייל ל (the bot still only drafts — does not send), compose new email, draft new mail.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      to: { type: Type.STRING, description: 'Recipient email address. Accept "Name <addr@x.com>" or plain "addr@x.com".' },
+      subject: { type: Type.STRING, description: 'Subject line.' },
+      body: { type: Type.STRING, description: 'Body text in the language Itai asked for (default Hebrew).' },
+    },
+    required: ['to', 'subject', 'body'],
   },
 };
 
@@ -621,6 +635,7 @@ Messages in [brackets] in conversation history are factual records of actions yo
           gmailListRecentDeclaration,
           gmailReadEmailDeclaration,
           gmailDraftReplyDeclaration,
+          gmailDraftNewDeclaration,
           gmailAddWatchLabelDeclaration,
           gmailRemoveWatchLabelDeclaration,
           gmailListWatchLabelsDeclaration,

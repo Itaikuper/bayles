@@ -1646,6 +1646,11 @@ ${config.botPrefix} Tell me a joke
                     await this.whatsapp.sendReply(jid, `✅ טיוטה נוצרה ב־Gmail (draftId: ${res.draftId}). ההודעה לא נשלחה — בדוק ב־Drafts ושלח משם.`, message);
                     return `[gmail_draft_reply created draftId=${res.draftId}]`;
                 }
+                case 'gmail_draft_new': {
+                    const res = await this.gmailService.createDraftNew(jid, String(args.to), String(args.subject), String(args.body));
+                    await this.whatsapp.sendReply(jid, `✅ טיוטה חדשה נוצרה ב־Gmail (draftId: ${res.draftId}). לא נשלח — פתח Drafts ב־Gmail ושלח משם.`, message);
+                    return `[gmail_draft_new created draftId=${res.draftId}]`;
+                }
                 case 'gmail_add_watch_label': {
                     const res = await this.gmailService.addWatchLabel(jid, args.labelName);
                     if (!res.ok) {

@@ -41,7 +41,13 @@ export declare class GmailService {
         threadId: string;
     }>;
     /**
-     * Create a draft reply. This is the ONLY write path. No send. No drafts.send.
+     * Create a fresh (non-reply) draft email. To/Subject/Body only. Never sends.
+     */
+    createDraftNew(jid: string, to: string, subject: string, body: string): Promise<{
+        draftId: string;
+    }>;
+    /**
+     * Create a draft reply. This is a write path. No send. No drafts.send.
      */
     createDraftReply(jid: string, messageId: string, body: string): Promise<{
         draftId: string;

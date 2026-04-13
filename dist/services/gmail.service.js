@@ -251,7 +251,23 @@ export class GmailService {
         };
     }
     /**
-     * Create a draft reply. This is the ONLY write path. No send. No drafts.send.
+     * Create a fresh (non-reply) draft email. To/Subject/Body only. Never sends.
+     */
+    async createDraftNew(jid, to, subject, body) {
+        const gmail = await this.getGmailClient(jid);
+        const mime = buildMime({ to, subject, body });
+        const raw = Buffer.from(mime).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        const res = await gmail.users.drafts.create({
+            userId: 'me',
+            requestBody: { message: { raw } },
+        });
+        if (!res.data.id)
+            throw new Error('Gmail drafts.create returned no id');
+        logger.info(`Gmail new draft created id=${res.data.id} to=${to.replace(/<.*/, '')}`);
+        return { draftId: res.data.id };
+    }
+    /**
+     * Create a draft reply. This is a write path. No send. No drafts.send.
      */
     async createDraftReply(jid, messageId, body) {
         const gmail = await this.getGmailClient(jid);
