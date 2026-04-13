@@ -4,16 +4,20 @@ import cron from 'node-cron';
 import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { getCalendarLinkRepository } from '../database/repositories/calendar-link.repository.js';
+import { getTaskRepository } from '../database/repositories/task.repository.js';
+import { getMemoryService } from './memory.service.js';
 export class CalendarService {
     whatsapp;
     gemini;
+    gmailService;
     calendar;
     cronTask = null;
     reminderCronTask = null;
     sentReminders = new Set(); // "eventId:jid" to avoid duplicates
-    constructor(whatsapp, gemini) {
+    constructor(whatsapp, gemini, gmailService) {
         this.whatsapp = whatsapp;
         this.gemini = gemini;
+        this.gmailService = gmailService;
         // Initialize Google Calendar API with service account
         const keyFile = JSON.parse(readFileSync(config.googleServiceAccountPath, 'utf-8'));
         const auth = new google.auth.GoogleAuth({
@@ -73,15 +77,21 @@ export class CalendarService {
                     const events = await this.listEvents(calId, startOfDay, endOfDay);
                     allEvents.push(...events);
                 }
+                allEvents.sort((a, b) => {
+                    const aTime = a.start?.dateTime || a.start?.date || '';
+                    const bTime = b.start?.dateTime || b.start?.date || '';
+                    return aTime.localeCompare(bTime);
+                });
+                // Owner JID gets the rich morning briefing (calendar + overnight emails + tasks)
+                if (config.gmailOwnerJid && jid === config.gmailOwnerJid) {
+                    const message = await this.composeOwnerMorningBriefing(allEvents);
+                    await this.whatsapp.sendTextMessage(jid, message);
+                    continue;
+                }
                 if (allEvents.length === 0) {
                     await this.whatsapp.sendTextMessage(jid, '📅 *סיכום יומי*\n\nאין אירועים היום. יום פנוי! 🎉');
                 }
                 else {
-                    allEvents.sort((a, b) => {
-                        const aTime = a.start?.dateTime || a.start?.date || '';
-                        const bTime = b.start?.dateTime || b.start?.date || '';
-                        return aTime.localeCompare(bTime);
-                    });
                     const formatted = this.formatEventList(allEvents, 'היום');
                     await this.whatsapp.sendTextMessage(jid, `📅 *סיכום יומי*\n\n${formatted}`);
                 }
@@ -90,6 +100,49 @@ export class CalendarService {
                 logger.error(`Failed to send daily summary to ${jid}:`, err);
             }
         }
+    }
+    /** Owner-only morning briefing: calendar today + overnight emails + top pending tasks. */
+    async composeOwnerMorningBriefing(events) {
+        const ownerJid = config.gmailOwnerJid;
+        const parts = ['☀️ *תדריך בוקר*\n'];
+        // Calendar
+        if (events.length === 0) {
+            parts.push('📅 *יומן:* יום פנוי 🎉');
+        }
+        else {
+            parts.push('📅 *יומן היום:*');
+            parts.push(this.formatEventList(events).replace('📅 אירועים :\n\n', ''));
+        }
+        // Overnight emails (last ~14h, watched labels + senders, unread)
+        if (this.gmailService) {
+            try {
+                const recent = await this.gmailService.listRecentEmails(ownerJid, { query: 'is:unread newer_than:14h', max: 8 });
+                if (recent.length > 0) {
+                    parts.push('\n📧 *מיילים מהלילה:*');
+                    for (const e of recent.slice(0, 8)) {
+                        parts.push(`• ${e.subject || '(ללא נושא)'} — ${e.from.split('<')[0].trim()}`);
+                    }
+                }
+            }
+            catch (err) {
+                logger.warn('Morning briefing: failed to fetch overnight emails', err);
+            }
+        }
+        // Top pending tasks
+        try {
+            const tasks = getTaskRepository().list(ownerJid, 'active');
+            if (tasks.length > 0) {
+                parts.push('\n📋 *משימות פתוחות:*');
+                for (const t of tasks.slice(0, 5)) {
+                    const due = t.due_at ? ` (עד ${new Date(t.due_at).toLocaleDateString('he-IL', { timeZone: 'Asia/Jerusalem' })})` : '';
+                    parts.push(`◻️ #${t.id} ${t.title}${due}`);
+                }
+            }
+        }
+        catch (err) {
+            logger.warn('Morning briefing: failed to load tasks', err);
+        }
+        return parts.join('\n');
     }
     async checkAndSendReminders() {
         const repo = getCalendarLinkRepository();
@@ -150,8 +203,8 @@ export class CalendarService {
                                     : event.description;
                                 msg += `\n📝 ${desc}`;
                             }
-                            // Generate AI brief about the meeting
-                            const brief = await this.generateMeetingBrief(event);
+                            // Generate AI brief about the meeting (enriched with memory + email for owner)
+                            const brief = await this.generateMeetingBrief(event, jid);
                             if (brief) {
                                 msg += `\n\n💡 ${brief}`;
                             }
@@ -280,7 +333,7 @@ export class CalendarService {
         const header = label ? `📅 אירועים ${label}:\n\n` : '';
         return `${header}${lines.join('\n')}`;
     }
-    async generateMeetingBrief(event) {
+    async generateMeetingBrief(event, jid) {
         try {
             const description = event.description?.substring(0, 500) || '';
             const location = event.location || '';
@@ -296,6 +349,33 @@ export class CalendarService {
                 parts.push(`מיקום: ${location}`);
             if (attendees)
                 parts.push(`משתתפים: ${attendees}`);
+            // Owner-only enrichment: pull memory notes about each attendee, plus latest email exchange.
+            const isOwner = jid && config.gmailOwnerJid && jid === config.gmailOwnerJid;
+            if (isOwner) {
+                const mem = getMemoryService();
+                const enrichedAttendees = [];
+                for (const a of (event.attendees || []).slice(0, 5)) {
+                    const key = a.displayName || a.email;
+                    if (!key)
+                        continue;
+                    const personMd = await mem.readPerson(key);
+                    if (personMd) {
+                        enrichedAttendees.push(`📁 *${key}* — ${personMd.split('\n').slice(0, 3).join(' ').slice(0, 200)}`);
+                    }
+                    if (this.gmailService && a.email) {
+                        try {
+                            const recent = await this.gmailService.listRecentEmails(jid, { query: `from:${a.email} OR to:${a.email}`, max: 2 });
+                            if (recent.length > 0) {
+                                enrichedAttendees.push(`📧 *${a.email}* — last: "${recent[0].subject || '(no subject)'}"`);
+                            }
+                        }
+                        catch { /* ignore */ }
+                    }
+                }
+                if (enrichedAttendees.length > 0) {
+                    parts.push(`\nהקשר אישי:\n${enrichedAttendees.join('\n')}`);
+                }
+            }
             const prompt = `אתה עוזר אישי. כתוב סיכום קצר בן 30-35 מילים בעברית על הפגישה הבאה. תן הקשר שימושי שיעזור להתכונן. אם יש רק כותרת, הסק מהכותרת מה הפגישה עשויה לכלול ותן טיפים להכנה. אל תכתוב כותרת או הקדמה, רק את הסיכום עצמו.\n\n${parts.join('\n')}`;
             const brief = await this.gemini.generateScheduledContent(prompt);
             return brief?.trim() || null;

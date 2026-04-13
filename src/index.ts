@@ -62,25 +62,7 @@ async function main() {
     // Initialize bot control service
     const botControl = getBotControlService();
 
-    // Initialize calendar service (optional - only if service account exists)
-    let calendarService: CalendarService | undefined;
-    if (existsSync(config.googleServiceAccountPath)) {
-      try {
-        calendarService = new CalendarService(whatsapp, gemini);
-        calendarService.start();
-        logger.info('CalendarService started');
-      } catch (err) {
-        logger.warn('CalendarService failed to initialize (calendar features disabled):', err);
-      }
-    } else {
-      logger.info('No service account found, calendar features disabled');
-    }
-
-    // Initialize chore rotation service
-    const choreRotationService = new ChoreRotationService(whatsapp, gemini);
-    choreRotationService.start();
-
-    // Initialize Gmail service (optional - only if GMAIL_* env vars are set)
+    // Initialize Gmail service first so CalendarService can use it for owner enrichment
     let gmailService: GmailService | undefined;
     if (checkGmailEnabled()) {
       try {
@@ -99,6 +81,24 @@ async function main() {
     } else {
       logger.info('Gmail env vars not set, Gmail features disabled');
     }
+
+    // Initialize calendar service (optional - only if service account exists)
+    let calendarService: CalendarService | undefined;
+    if (existsSync(config.googleServiceAccountPath)) {
+      try {
+        calendarService = new CalendarService(whatsapp, gemini, gmailService);
+        calendarService.start();
+        logger.info('CalendarService started');
+      } catch (err) {
+        logger.warn('CalendarService failed to initialize (calendar features disabled):', err);
+      }
+    } else {
+      logger.info('No service account found, calendar features disabled');
+    }
+
+    // Initialize chore rotation service
+    const choreRotationService = new ChoreRotationService(whatsapp, gemini);
+    choreRotationService.start();
 
     // Initialize message handler
     const messageHandler = new MessageHandler(whatsapp, gemini, scheduler, botControl, birthdayService, calendarService, choreRotationService, gmailService);

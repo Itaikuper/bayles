@@ -38,7 +38,40 @@ The Gemini API key should be restricted to **Generative Language API** only. If 
 
 ### Gmail (private personal assistant)
 
-Single-owner OAuth2. Restricted to `GMAIL_OWNER_JID`. Scopes: `gmail.readonly` + `gmail.modify` (NO `gmail.send` — the bot only creates drafts). Tables: `gmail_credentials` (encrypted refresh token), `gmail_watch_labels`, `gmail_seen_messages`. Poller every 7 min (`GMAIL_POLL_CRON`) notifies WhatsApp about new unread emails carrying a watched Gmail label. Link once via `GET /api/gmail/oauth/start?jid=<owner_jid>` → open returned URL → consent → callback stores encrypted token.
+Single-owner OAuth2. Restricted to `GMAIL_OWNER_JID`. Scopes: `gmail.readonly` + `gmail.modify` (NO `gmail.send` — the bot only creates drafts). Tables: `gmail_credentials` (encrypted refresh token), `gmail_watch_labels`, `gmail_watch_senders`, `gmail_seen_messages`. Poller every 7 min (`GMAIL_POLL_CRON`) notifies WhatsApp about new unread emails matching watched labels OR watched sender addresses. Link once via `GET /api/gmail/oauth/start?jid=<owner_jid>` → open returned URL → consent → callback stores encrypted token.
+
+### Personal-assistant mode (owner DM)
+
+Triggered automatically when the message JID equals `GMAIL_OWNER_JID`. Implemented in `src/services/gemini.service.ts` via `getAssistantMode()`. In owner mode:
+
+- Focused identity prompt — Hebrew, terse, no filler, no auto-images, eager tool calling
+- All personal-assistant tools always available (no keyword regex gates): calendar (CRUD), gmail (read+drafts), tasks, memory, schedule
+- `googleSearch` disabled (SDK can't combine with `functionDeclarations`); accepted trade-off
+- Knowledge-base injection disabled (replaced by markdown memory)
+
+**Memory layout** (markdown on disk, NOT committed; lives at `data/memory/owner/` on the server):
+
+```
+data/memory/owner/
+├── core.md           # ALWAYS injected into system prompt (~100 lines, curated)
+├── daily/YYYY-MM-DD.md  # auto-appended notes; today + yesterday loaded
+├── people/<slug>.md  # on-demand via search_memory tool
+└── projects/<slug>.md  # on-demand via search_memory tool
+```
+
+`MemoryService` (`src/services/memory.service.ts`) handles atomic reads/writes. The owner can edit `core.md` directly with VSCode over `gcloud compute scp`, or via the bot's `update_core_memory` tool.
+
+**Owner-only tools** (defined in `gemini.service.ts`, dispatched in `message.handler.ts`):
+- Calendar: `list/create/update/delete_calendar_events`
+- Gmail: `gmail_list_recent_emails`, `gmail_read_email`, `gmail_draft_reply`, `gmail_add/remove/list_watch_label`, `gmail_add/remove/list_watch_sender`
+- Tasks: `add_task`, `list_tasks`, `complete_task`, `snooze_task` (table `tasks`, migration 015)
+- Memory: `search_memory`, `update_core_memory`, `append_person_note`, `append_project_note`
+- Reminders: `create_schedule`
+
+**Autonomous workflows for owner**:
+- **Morning briefing** at 07:00 (`CALENDAR_DAILY_SUMMARY_CRON`): single combined Hebrew message with today's events, overnight unread emails (`newer_than:14h`), and top pending tasks.
+- **Meeting prep** 30 min before each event (`*/5 * * * *` reminder cron): existing reminder + AI brief enriched with `memory/people/<attendee>.md` notes and recent email exchange with each attendee.
+- **Email triage** every 7 min (`GMAIL_POLL_CRON`): new emails matching watched labels OR senders → WhatsApp notification.
 
 ## Production Server (Google Compute Engine)
 
