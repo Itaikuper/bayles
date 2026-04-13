@@ -461,6 +461,26 @@ export function runMigrations(): void {
   runGmailMigration(db);
   runTasksMigration(db);
   runGmailSendersMigration(db);
+  runGmailBlocklistMigration(db);
+}
+
+function runGmailBlocklistMigration(db: ReturnType<typeof getDatabase>): void {
+  const applied = db.prepare('SELECT name FROM migrations WHERE name = ?').get('017_gmail_blocklist');
+  if (applied) return;
+  logger.info('Running migration: 017_gmail_blocklist');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS gmail_sender_blocklist (
+      jid TEXT NOT NULL,
+      pattern TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (jid, pattern)
+    )
+  `);
+  db.exec(`
+    INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('personal_inbox_enabled', 'true')
+  `);
+  db.prepare('INSERT INTO migrations (name) VALUES (?)').run('017_gmail_blocklist');
+  logger.info('Migration 017_gmail_blocklist completed');
 }
 
 function runGmailSendersMigration(db: ReturnType<typeof getDatabase>): void {

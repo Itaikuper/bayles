@@ -189,9 +189,18 @@ export class MessageHandler {
       return;
     }
 
-    // Generate AI response
+    await this.runAIWithDispatch(jid, cleanText, isGroup, sender, message, decision.customPrompt);
+  }
+
+  private async runAIWithDispatch(
+    jid: string,
+    cleanText: string,
+    isGroup: boolean,
+    sender: string | null | undefined,
+    message: proto.IWebMessageInfo,
+    customPrompt?: string
+  ): Promise<void> {
     try {
-      // In groups, include sender's name so the AI knows who's talking
       const messageForAI = isGroup && message.pushName
         ? `[${message.pushName}]: ${cleanText}`
         : cleanText;
@@ -199,12 +208,11 @@ export class MessageHandler {
       const response = await this.gemini.generateResponse(
         jid,
         messageForAI,
-        decision.customPrompt,
+        customPrompt,
         'default',
         sender || undefined
       );
 
-      // Handle function calls (e.g., scheduling)
       if (response.type === 'function_call' && response.functionCall) {
         let actionSummary: string | null = null;
 
@@ -321,6 +329,19 @@ export class MessageHandler {
     try {
       const audioBuffer = await this.whatsapp.downloadAudio(audioMessage);
       const mimeType = audioMessage.mimetype || 'audio/ogg; codecs=opus';
+
+      // Owner mode: transcribe first, then route through the text pipeline so
+      // we get full tool access (gmail drafts, calendar, tasks, memory).
+      if (this.gemini.isOwnerMode(jid, sender || undefined)) {
+        const transcription = await this.gemini.transcribeAudio(audioBuffer, mimeType);
+        logger.info(`Owner voice transcription: ${transcription}`);
+        if (!transcription || /^לא זוהה דיבור\.?$/.test(transcription.trim())) {
+          await this.whatsapp.sendReply(jid, 'לא הצלחתי לשמוע אותך, נסה שוב.', message);
+          return;
+        }
+        await this.runAIWithDispatch(jid, transcription, isGroup, sender, message, decision.customPrompt);
+        return;
+      }
 
       const contextPrefix = isGroup && message.pushName
         ? `[${message.pushName}]`
@@ -2250,6 +2271,40 @@ ${config.botPrefix} Tell me a joke
             : 'שולחים במעקב:\n' + senders.map(s => `• ${s}`).join('\n');
           await this.whatsapp.sendReply(jid, text, message);
           return `[gmail_list_watch_senders: ${senders.length}]`;
+        }
+        case 'gmail_block_sender': {
+          const pattern = String(args.pattern || '').trim().toLowerCase();
+          if (!pattern) {
+            await this.whatsapp.sendReply(jid, 'לא סופק דפוס לחסימה.', message);
+            return '[gmail_block_sender: empty]';
+          }
+          this.gmailService.blockSender(jid, pattern);
+          await this.whatsapp.sendReply(jid, `🚫 נחסם: *${pattern}*. כל מייל עם זה ב-From לא יודיע יותר.`, message);
+          return `[gmail_block_sender: ${pattern}]`;
+        }
+        case 'gmail_unblock_sender': {
+          const pattern = String(args.pattern || '').trim().toLowerCase();
+          const n = this.gmailService.unblockSender(jid, pattern);
+          await this.whatsapp.sendReply(jid, n > 0 ? `✅ ${pattern} הוסר מהחסימה.` : `${pattern} לא היה חסום.`, message);
+          return `[gmail_unblock_sender: ${n}]`;
+        }
+        case 'gmail_list_blocked': {
+          const blocked = this.gmailService.listBlocked(jid);
+          const text = blocked.length === 0
+            ? 'אין חסימות.'
+            : 'חסימות אקטיביות:\n' + blocked.map(p => `• ${p}`).join('\n');
+          await this.whatsapp.sendReply(jid, text, message);
+          return `[gmail_list_blocked: ${blocked.length}]`;
+        }
+        case 'gmail_enable_personal_inbox': {
+          this.gmailService.setPersonalInboxEnabled(true);
+          await this.whatsapp.sendReply(jid, '✅ מעקב אחרי הדואר האישי פעיל. תקבל הודעה על כל מייל אישי חדש ב-Primary.', message);
+          return '[gmail_enable_personal_inbox]';
+        }
+        case 'gmail_disable_personal_inbox': {
+          this.gmailService.setPersonalInboxEnabled(false);
+          await this.whatsapp.sendReply(jid, '🔕 מעקב אחרי הדואר האישי כבוי. תוויות ושולחים שהגדרת עדיין פעילים.', message);
+          return '[gmail_disable_personal_inbox]';
         }
         default:
           logger.warn(`Unhandled gmail function: ${name}`);

@@ -5,6 +5,8 @@ import type { ScheduledTask } from 'node-cron';
 import { config, isGmailEnabled } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { getGmailRepository, type GmailWatchLabel } from '../database/repositories/gmail.repository.js';
+import { getGmailBlocklistRepository } from '../database/repositories/gmail-blocklist.repository.js';
+import { getBotSettingsRepository } from '../database/repositories/bot-settings.repository.js';
 import { encryptToken, decryptToken } from './gmail-crypto.js';
 import type { WhatsAppService } from './whatsapp.service.js';
 import type { GeminiService } from './gemini.service.js';
@@ -162,6 +164,49 @@ export class GmailService {
         }
       }
 
+      // Personal-inbox pass: Gmail "Primary" category minus bulk heuristics
+      if (this.isPersonalInboxEnabled()) {
+        try {
+          const list = await gmail.users.messages.list({
+            userId: 'me',
+            q: 'category:primary is:unread newer_than:1d',
+            maxResults: MAX_MESSAGES_PER_POLL,
+          });
+          const messages = list.data.messages || [];
+          const blocklist = getGmailBlocklistRepository();
+          for (const m of messages) {
+            if (!m.id) continue;
+            if (repo.isSeen(ownerJid, m.id)) continue;
+            try {
+              const meta = await gmail.users.messages.get({
+                userId: 'me',
+                id: m.id,
+                format: 'metadata',
+                metadataHeaders: ['From', 'Subject', 'Date', 'List-Unsubscribe', 'Precedence', 'Auto-Submitted'],
+              });
+              const headers = meta.data.payload?.headers || [];
+              const header = (name: string) => headers.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+
+              // Bulk-mail heuristics
+              if (header('List-Unsubscribe')) continue;
+              const prec = header('Precedence').toLowerCase();
+              if (prec === 'bulk' || prec === 'list' || prec === 'junk') continue;
+              if (header('Auto-Submitted').toLowerCase() === 'auto-generated') continue;
+
+              // User-curated blocklist
+              if (blocklist.matches(ownerJid, header('From'))) continue;
+
+              await this.notifyAboutMessage(gmail, ownerJid, m.id, 'personal');
+              repo.markSeen(ownerJid, m.id);
+            } catch (err) {
+              logger.error(`Failed to process primary-inbox message id=${m.id}:`, err);
+            }
+          }
+        } catch (err) {
+          logger.error('Failed to poll primary inbox:', err);
+        }
+      }
+
       // Sender-based query (single combined OR query)
       if (senders.length > 0) {
         try {
@@ -212,7 +257,7 @@ export class GmailService {
     const subject = get('Subject') || '(ללא נושא)';
     const snippet = (msg.data.snippet || '').slice(0, 300);
 
-    const text = [
+    const lines = [
       `📧 *מייל חדש* (${source})`,
       `*מאת:* ${from}`,
       `*נושא:* ${subject}`,
@@ -220,9 +265,15 @@ export class GmailService {
       snippet,
       '',
       `_id: ${messageId}_`,
-    ].join('\n');
+    ];
+    if (source === 'personal') {
+      // Extract a good blocklist hint: prefer domain (@example.com) from the From header
+      const emailMatch = from.match(/[\w.+-]+@([\w-]+(?:\.[\w-]+)+)/);
+      const hint = emailMatch ? `@${emailMatch[1]}` : from.split('<')[0].trim().split(/\s+/)[0] || 'X';
+      lines.push(`_לא רלוונטי? שלח: "חסום ${hint}"_`);
+    }
 
-    await this.whatsapp.sendTextMessage(jid, text);
+    await this.whatsapp.sendTextMessage(jid, lines.join('\n'));
     logger.info(`Gmail notified jid=${jid.slice(0, 6)}... source=${source} msgId=${messageId}`);
   }
 
@@ -374,6 +425,30 @@ export class GmailService {
   listWatchSenders(jid: string): string[] {
     this.assertOwner(jid);
     return getGmailRepository().listWatchSenders(jid);
+  }
+
+  // --- Blocklist (called from WhatsApp) ---
+
+  blockSender(jid: string, pattern: string): void {
+    this.assertOwner(jid);
+    getGmailBlocklistRepository().add(jid, pattern);
+  }
+  unblockSender(jid: string, pattern: string): number {
+    this.assertOwner(jid);
+    return getGmailBlocklistRepository().remove(jid, pattern);
+  }
+  listBlocked(jid: string): string[] {
+    this.assertOwner(jid);
+    return getGmailBlocklistRepository().list(jid);
+  }
+
+  // --- Personal-inbox toggle ---
+
+  isPersonalInboxEnabled(): boolean {
+    return getBotSettingsRepository().get('personal_inbox_enabled') !== 'false';
+  }
+  setPersonalInboxEnabled(on: boolean): void {
+    getBotSettingsRepository().set('personal_inbox_enabled', on ? 'true' : 'false');
   }
 
   async listAllGmailLabels(jid: string): Promise<{ id: string; name: string }[]> {

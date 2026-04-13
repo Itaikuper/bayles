@@ -64,6 +64,11 @@ export declare class GmailService {
     addWatchSender(jid: string, email: string): void;
     removeWatchSender(jid: string, email: string): number;
     listWatchSenders(jid: string): string[];
+    blockSender(jid: string, pattern: string): void;
+    unblockSender(jid: string, pattern: string): number;
+    listBlocked(jid: string): string[];
+    isPersonalInboxEnabled(): boolean;
+    setPersonalInboxEnabled(on: boolean): void;
     listAllGmailLabels(jid: string): Promise<{
         id: string;
         name: string;

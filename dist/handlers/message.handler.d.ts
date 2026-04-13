@@ -23,6 +23,7 @@ export declare class MessageHandler {
     private readonly MEDIATION_TTL_MS;
     constructor(whatsapp: WhatsAppService, gemini: GeminiService, scheduler: SchedulerService, botControl: BotControlService, birthdayService: BirthdayService, calendarService?: CalendarService | undefined, choreRotationService?: ChoreRotationService | undefined, gmailService?: GmailService | undefined);
     handle(message: proto.IWebMessageInfo): Promise<void>;
+    private runAIWithDispatch;
     private extractText;
     private handleAudioMessage;
     private handleTranscribeCommand;

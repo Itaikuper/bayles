@@ -71,7 +71,7 @@ data/memory/owner/
 **Autonomous workflows for owner**:
 - **Morning briefing** at 07:00 (`CALENDAR_DAILY_SUMMARY_CRON`): single combined Hebrew message with today's events, overnight unread emails (`newer_than:14h`), and top pending tasks.
 - **Meeting prep** 30 min before each event (`*/5 * * * *` reminder cron): existing reminder + AI brief enriched with `memory/people/<attendee>.md` notes and recent email exchange with each attendee.
-- **Email triage** every 7 min (`GMAIL_POLL_CRON`): new emails matching watched labels OR senders → WhatsApp notification.
+- **Email triage** every 7 min (`GMAIL_POLL_CRON`): new emails matching watched labels OR senders OR (if `personal_inbox_enabled=true` in `bot_settings`) unread mail in the Gmail Primary tab minus bulk heuristics (`List-Unsubscribe`, `Precedence: bulk|list`, `Auto-Submitted`) minus the user's `gmail_sender_blocklist` substrings. Migration 017; managed via `gmail_block_sender` / `gmail_unblock_sender` / `gmail_list_blocked` / `gmail_enable_personal_inbox` / `gmail_disable_personal_inbox`.
 
 ## Production Server (Google Compute Engine)
 

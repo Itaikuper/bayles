@@ -379,6 +379,41 @@ const gmailListWatchSendersDeclaration = {
     description: 'List which sender email addresses are being monitored.',
     parameters: { type: Type.OBJECT, properties: {} },
 };
+const gmailBlockSenderDeclaration = {
+    name: 'gmail_block_sender',
+    description: 'Suppress personal-inbox notifications for any email whose From header contains this substring. Use when Itai wants to stop getting pinged about a specific sender or domain (e.g., "חסום bezeq", "block @iec.co.il", "אל תעדכן אותי מ-paybox"). Pattern examples: "bezeq", "@iec.co.il", "marketing@partner.co.il".',
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            pattern: { type: Type.STRING, description: 'Substring to match against the From header (case-insensitive). Prefer "@domain.tld" for whole-domain blocks, or a full email address for one sender.' },
+        },
+        required: ['pattern'],
+    },
+};
+const gmailUnblockSenderDeclaration = {
+    name: 'gmail_unblock_sender',
+    description: 'Remove a pattern from the personal-inbox blocklist. Keywords: "בטל חסימה", "unblock", "תחזיר את X לחסימה".',
+    parameters: {
+        type: Type.OBJECT,
+        properties: { pattern: { type: Type.STRING } },
+        required: ['pattern'],
+    },
+};
+const gmailListBlockedDeclaration = {
+    name: 'gmail_list_blocked',
+    description: 'Show the list of blocked substrings for personal-inbox notifications. Keywords: "מה חסום", "מי חסום", "list blocked".',
+    parameters: { type: Type.OBJECT, properties: {} },
+};
+const gmailEnablePersonalInboxDeclaration = {
+    name: 'gmail_enable_personal_inbox',
+    description: 'Turn ON notifications for personal emails landing in the Gmail Primary tab. Keywords: "הפעל מעקב דואר אישי", "start personal inbox".',
+    parameters: { type: Type.OBJECT, properties: {} },
+};
+const gmailDisablePersonalInboxDeclaration = {
+    name: 'gmail_disable_personal_inbox',
+    description: 'Turn OFF notifications for personal emails landing in the Gmail Primary tab (watched labels and senders still notify). Keywords: "בטל מעקב דואר אישי", "pause personal inbox".',
+    parameters: { type: Type.OBJECT, properties: {} },
+};
 // --- Memory (owner mode) ---
 const searchMemoryDeclaration = {
     name: 'search_memory',
@@ -515,6 +550,9 @@ export class GeminiService {
      * Returns the assistant mode for a given chat. Owner DM gets a focused personal-assistant prompt
      * with eager tool use and no image auto-generation. Default chats keep current behavior.
      */
+    isOwnerMode(jid, senderJid) {
+        return this.getAssistantMode(jid, senderJid) === 'owner';
+    }
     getAssistantMode(jid, senderJid) {
         if (!config.gmailOwnerJid)
             return 'default';
@@ -612,7 +650,7 @@ Messages in [brackets] in conversation history are factual records of actions yo
             if (mode === 'owner') {
                 // Owner mode: always include the full personal-assistant tool set. No keyword regex gates.
                 // Let Gemini decide when to call each tool based on the message + system prompt.
-                functionDeclarations.push(listCalendarEventsDeclaration, createCalendarEventDeclaration, updateCalendarEventDeclaration, deleteCalendarEventDeclaration, gmailListRecentDeclaration, gmailReadEmailDeclaration, gmailDraftReplyDeclaration, gmailDraftNewDeclaration, gmailAddWatchLabelDeclaration, gmailRemoveWatchLabelDeclaration, gmailListWatchLabelsDeclaration, gmailAddWatchSenderDeclaration, gmailRemoveWatchSenderDeclaration, gmailListWatchSendersDeclaration, createScheduleDeclaration, searchMemoryDeclaration, updateCoreMemoryDeclaration, appendPersonNoteDeclaration, appendProjectNoteDeclaration, addTaskDeclaration, listTasksDeclaration, completeTaskDeclaration, snoozeTaskDeclaration);
+                functionDeclarations.push(listCalendarEventsDeclaration, createCalendarEventDeclaration, updateCalendarEventDeclaration, deleteCalendarEventDeclaration, gmailListRecentDeclaration, gmailReadEmailDeclaration, gmailDraftReplyDeclaration, gmailDraftNewDeclaration, gmailAddWatchLabelDeclaration, gmailRemoveWatchLabelDeclaration, gmailListWatchLabelsDeclaration, gmailAddWatchSenderDeclaration, gmailRemoveWatchSenderDeclaration, gmailListWatchSendersDeclaration, gmailBlockSenderDeclaration, gmailUnblockSenderDeclaration, gmailListBlockedDeclaration, gmailEnablePersonalInboxDeclaration, gmailDisablePersonalInboxDeclaration, createScheduleDeclaration, searchMemoryDeclaration, updateCoreMemoryDeclaration, appendPersonNoteDeclaration, appendProjectNoteDeclaration, addTaskDeclaration, listTasksDeclaration, completeTaskDeclaration, snoozeTaskDeclaration);
             }
             else {
                 // Default mode: existing keyword-gated tool selection.
