@@ -27,6 +27,29 @@ export declare class GeminiService {
      */
     generateScheduledContent(prompt: string): Promise<string>;
     /**
+     * Resolve a free-form recipient hint ("אסתר", "ליתי קופרס", "esther@...") to an email.
+     * Uses the owner's core memory + people notes. Returns null if unknown.
+     */
+    resolveEmailRecipient(hint: string): Promise<{
+        email: string | null;
+        label: string | null;
+    }>;
+    /**
+     * Generate the subject + body for a new email draft. Single focused LLM call,
+     * structured output. No tool calling — the workflow owns the sequence.
+     */
+    generateEmailBody(opts: {
+        topicHint: string;
+        subjectHint?: string;
+        recipientLabel?: string | null;
+        recipientEmail: string;
+        priorThreadSnippets?: string[];
+        ownerCoreMemory?: string;
+    }): Promise<{
+        subject: string;
+        body: string;
+    }>;
+    /**
      * Extract persistent facts about the user from a conversation exchange.
      * Runs asynchronously after sending the AI response - does not block.
      */

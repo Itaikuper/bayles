@@ -1181,6 +1181,149 @@ Messages in [brackets] in conversation history are factual records of actions yo
   }
 
   /**
+   * Resolve a free-form recipient hint ("אסתר", "ליתי קופרס", "esther@...") to an email.
+   * Uses the owner's core memory + people notes. Returns null if unknown.
+   */
+  async resolveEmailRecipient(hint: string): Promise<{ email: string | null; label: string | null }> {
+    if (!hint) return { email: null, label: null };
+    const trimmed = hint.trim();
+    const emailRegex = /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/;
+    const angleMatch = trimmed.match(/<([^>]+@[^>]+)>/);
+    if (angleMatch) return { email: angleMatch[1], label: trimmed.replace(/\s*<[^>]+>/, '').trim() || null };
+    if (emailRegex.test(trimmed)) return { email: trimmed, label: null };
+
+    const memory = getMemoryService();
+    let context = '';
+    try {
+      const core = await memory.readCore();
+      context += `CORE:\n${core}\n\n`;
+      const people = await memory.listPeople();
+      for (const slug of people.slice(0, 40)) {
+        const body = await memory.readPerson(slug);
+        if (body) context += `PERSON ${slug}:\n${body.slice(0, 600)}\n\n`;
+      }
+    } catch (err) {
+      logger.warn('[recipient] memory read failed:', err);
+    }
+
+    const prompt = `You resolve a recipient for an email draft in a Hebrew personal-assistant bot.
+
+Owner memory (core + people notes):
+"""
+${context || '(no memory available)'}
+"""
+
+Recipient hint from the user: "${trimmed}"
+
+Return JSON with fields:
+- email: the best matching email address, or empty string if none found.
+- label: the recipient's display name (Hebrew or English as it appears in memory), or empty string.
+
+Rules:
+- Only return an email that literally appears in the memory above. Do NOT invent addresses.
+- If the hint is ambiguous or unknown, return empty strings.
+- Match on first name, nickname, full name, or role.`;
+
+    try {
+      const response = await this.ai.models.generateContent({
+        model: config.geminiModel,
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              email: { type: Type.STRING, description: 'Resolved email or empty string.' },
+              label: { type: Type.STRING, description: 'Display name or empty string.' },
+            },
+            required: ['email', 'label'],
+          },
+          temperature: 0,
+        },
+      });
+      const parsed = JSON.parse(response.text?.trim() || '{}') as { email?: string; label?: string };
+      const email = (parsed.email || '').trim();
+      const label = (parsed.label || '').trim();
+      return {
+        email: email && emailRegex.test(email) ? email : null,
+        label: label || null,
+      };
+    } catch (err) {
+      logger.warn('[recipient] resolve failed:', err);
+      return { email: null, label: null };
+    }
+  }
+
+  /**
+   * Generate the subject + body for a new email draft. Single focused LLM call,
+   * structured output. No tool calling — the workflow owns the sequence.
+   */
+  async generateEmailBody(opts: {
+    topicHint: string;
+    subjectHint?: string;
+    recipientLabel?: string | null;
+    recipientEmail: string;
+    priorThreadSnippets?: string[];
+    ownerCoreMemory?: string;
+  }): Promise<{ subject: string; body: string }> {
+    const { topicHint, subjectHint, recipientLabel, recipientEmail, priorThreadSnippets, ownerCoreMemory } = opts;
+
+    const thread = priorThreadSnippets?.length
+      ? `Prior thread context (most recent first):\n${priorThreadSnippets.slice(0, 3).map((s, i) => `[${i + 1}] ${s}`).join('\n\n')}`
+      : '(no prior thread)';
+
+    const prompt = `You are Itai's personal email drafter. Write a single, ready-to-send email on his behalf.
+
+Who you are drafting as: Itai (the owner). Do NOT mention "an assistant" or refer to yourself in third person. Write in first person as Itai.
+
+Recipient: ${recipientLabel || recipientEmail} <${recipientEmail}>
+What the user asked for: ${topicHint || '(no specific topic — infer from subject/context)'}
+${subjectHint ? `Suggested subject: ${subjectHint}` : ''}
+
+${thread}
+
+Owner core memory (facts about Itai to ground the email):
+"""
+${ownerCoreMemory || '(none)'}
+"""
+
+Rules:
+- Language: match the language of the topic/subject hint. Hebrew by default if Hebrew hints are used.
+- Tone: natural, human, direct. Not robotic. Not overly formal unless the topic is formal.
+- Length: proportional to the ask. A short message stays short (2–4 sentences). A detailed ask gets a proper body.
+- If the ask is creative (e.g., "שיר אהבה"), write the creative content as the body itself — do not explain what you're writing.
+- Do NOT add fake signoffs with placeholders like "[שם]" — sign off as "איתי" (or "Itai" if English) without brackets.
+- Do NOT include the To/From/headers — only subject + body.
+- The subject should be short, specific, and reflect the content — not the literal user request.
+
+Return JSON with fields:
+- subject: the email subject line.
+- body: the full email body, ready to send, including the greeting and signoff.`;
+
+    const response = await this.ai.models.generateContent({
+      model: config.geminiModel,
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            subject: { type: Type.STRING, description: 'Email subject line.' },
+            body: { type: Type.STRING, description: 'Full email body, ready to send.' },
+          },
+          required: ['subject', 'body'],
+        },
+        temperature: 0.7,
+      },
+    });
+    const parsed = JSON.parse(response.text?.trim() || '{}') as { subject?: string; body?: string };
+    return {
+      subject: (parsed.subject || subjectHint || 'ללא נושא').trim(),
+      body: (parsed.body || '').trim(),
+    };
+  }
+
+  /**
    * Extract persistent facts about the user from a conversation exchange.
    * Runs asynchronously after sending the AI response - does not block.
    */

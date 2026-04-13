@@ -17,6 +17,8 @@ import { getSongRepository } from '../database/repositories/song.repository.js';
 import { getContactRepository } from '../database/repositories/contact.repository.js';
 import { getHoshayaDirectoryRepository } from '../database/repositories/hoshaya-directory.repository.js';
 import { getCalendarLinkRepository } from '../database/repositories/calendar-link.repository.js';
+import { getIntentService } from '../services/intent.service.js';
+import { runEmailNewWorkflow } from '../services/workflows/email-new.workflow.js';
 
 export class MessageHandler {
   private voiceModeJids: Set<string> = new Set();
@@ -201,6 +203,21 @@ export class MessageHandler {
     customPrompt?: string
   ): Promise<void> {
     try {
+      // Owner-mode workflow routing: deterministic scripts for well-defined verbs.
+      // Falls through to the existing agent-style dispatch for anything else.
+      if (this.gemini.isOwnerMode(jid, sender || undefined) && this.gmailService) {
+        const classified = await getIntentService().classify(cleanText);
+        logger.info(`[intent] ${classified.intent} — ${classified.reasoning || ''} slots=${JSON.stringify(classified.slots)}`);
+        if (classified.intent === 'email_new') {
+          const handled = await runEmailNewWorkflow(jid, classified.slots, message, {
+            gemini: this.gemini,
+            gmail: this.gmailService,
+            whatsapp: this.whatsapp,
+          });
+          if (handled) return;
+        }
+      }
+
       const messageForAI = isGroup && message.pushName
         ? `[${message.pushName}]: ${cleanText}`
         : cleanText;
