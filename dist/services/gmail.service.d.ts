@@ -45,12 +45,14 @@ export declare class GmailService {
      */
     createDraftNew(jid: string, to: string, subject: string, body: string): Promise<{
         draftId: string;
+        threadId: string | null;
     }>;
     /**
      * Create a draft reply. This is a write path. No send. No drafts.send.
      */
     createDraftReply(jid: string, messageId: string, body: string): Promise<{
         draftId: string;
+        threadId: string | null;
     }>;
     addWatchLabel(jid: string, labelName: string): Promise<{
         ok: boolean;

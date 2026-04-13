@@ -264,7 +264,7 @@ export class GmailService {
         if (!res.data.id)
             throw new Error('Gmail drafts.create returned no id');
         logger.info(`Gmail new draft created id=${res.data.id} to=${to.replace(/<.*/, '')}`);
-        return { draftId: res.data.id };
+        return { draftId: res.data.id, threadId: res.data.message?.threadId || null };
     }
     /**
      * Create a draft reply. This is a write path. No send. No drafts.send.
@@ -300,7 +300,7 @@ export class GmailService {
         if (!res.data.id)
             throw new Error('Gmail drafts.create returned no id');
         logger.info(`Gmail draft created id=${res.data.id} for msgId=${messageId}`);
-        return { draftId: res.data.id };
+        return { draftId: res.data.id, threadId: res.data.message?.threadId || orig.data.threadId || null };
     }
     // --- Label management (called from WhatsApp) ---
     async addWatchLabel(jid, labelName) {

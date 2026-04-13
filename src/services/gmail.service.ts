@@ -288,7 +288,7 @@ export class GmailService {
   /**
    * Create a fresh (non-reply) draft email. To/Subject/Body only. Never sends.
    */
-  async createDraftNew(jid: string, to: string, subject: string, body: string): Promise<{ draftId: string }> {
+  async createDraftNew(jid: string, to: string, subject: string, body: string): Promise<{ draftId: string; threadId: string | null }> {
     const gmail = await this.getGmailClient(jid);
     const mime = buildMime({ to, subject, body });
     const raw = Buffer.from(mime).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -298,13 +298,13 @@ export class GmailService {
     });
     if (!res.data.id) throw new Error('Gmail drafts.create returned no id');
     logger.info(`Gmail new draft created id=${res.data.id} to=${to.replace(/<.*/, '')}`);
-    return { draftId: res.data.id };
+    return { draftId: res.data.id, threadId: res.data.message?.threadId || null };
   }
 
   /**
    * Create a draft reply. This is a write path. No send. No drafts.send.
    */
-  async createDraftReply(jid: string, messageId: string, body: string): Promise<{ draftId: string }> {
+  async createDraftReply(jid: string, messageId: string, body: string): Promise<{ draftId: string; threadId: string | null }> {
     const gmail = await this.getGmailClient(jid);
     const orig = await gmail.users.messages.get({ userId: 'me', id: messageId, format: 'metadata', metadataHeaders: ['From', 'Subject', 'Message-ID', 'References'] });
     const headers = orig.data.payload?.headers || [];
@@ -337,7 +337,7 @@ export class GmailService {
     });
     if (!res.data.id) throw new Error('Gmail drafts.create returned no id');
     logger.info(`Gmail draft created id=${res.data.id} for msgId=${messageId}`);
-    return { draftId: res.data.id };
+    return { draftId: res.data.id, threadId: res.data.message?.threadId || orig.data.threadId || null };
   }
 
   // --- Label management (called from WhatsApp) ---

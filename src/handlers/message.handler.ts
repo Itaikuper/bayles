@@ -2195,12 +2195,14 @@ ${config.botPrefix} Tell me a joke
         }
         case 'gmail_draft_reply': {
           const res = await this.gmailService.createDraftReply(jid, args.messageId as string, args.body as string);
-          await this.whatsapp.sendReply(jid, `✅ טיוטה נוצרה ב־Gmail (draftId: ${res.draftId}). ההודעה לא נשלחה — בדוק ב־Drafts ושלח משם.`, message);
+          const link = res.threadId ? `https://mail.google.com/mail/u/0/#drafts/${res.threadId}` : 'https://mail.google.com/mail/u/0/#drafts';
+          await this.whatsapp.sendReply(jid, `✅ טיוטה מוכנה.\n🔗 ${link}\n_לא נשלח — פתח לבדיקה ושלח מהדפדפן._`, message);
           return `[gmail_draft_reply created draftId=${res.draftId}]`;
         }
         case 'gmail_draft_new': {
           const res = await this.gmailService.createDraftNew(jid, String(args.to), String(args.subject), String(args.body));
-          await this.whatsapp.sendReply(jid, `✅ טיוטה חדשה נוצרה ב־Gmail (draftId: ${res.draftId}). לא נשלח — פתח Drafts ב־Gmail ושלח משם.`, message);
+          const link = res.threadId ? `https://mail.google.com/mail/u/0/#drafts/${res.threadId}` : 'https://mail.google.com/mail/u/0/#drafts';
+          await this.whatsapp.sendReply(jid, `✅ טיוטה מוכנה.\n📬 ל: ${args.to}\n📝 ${args.subject}\n🔗 ${link}\n_לא נשלח — פתח לבדיקה ושלח מהדפדפן._`, message);
           return `[gmail_draft_new created draftId=${res.draftId}]`;
         }
         case 'gmail_add_watch_label': {
