@@ -376,6 +376,48 @@ export function runMigrations() {
         logger.info('Migration 013_chore_rotations completed');
     }
     runGmailMigration(db);
+    runTasksMigration(db);
+    runGmailSendersMigration(db);
+}
+function runGmailSendersMigration(db) {
+    const applied = db.prepare('SELECT name FROM migrations WHERE name = ?').get('016_gmail_watch_senders');
+    if (applied)
+        return;
+    logger.info('Running migration: 016_gmail_watch_senders');
+    db.exec(`
+    CREATE TABLE IF NOT EXISTS gmail_watch_senders (
+      jid TEXT NOT NULL,
+      email TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (jid, email)
+    )
+  `);
+    db.prepare('INSERT INTO migrations (name) VALUES (?)').run('016_gmail_watch_senders');
+    logger.info('Migration 016_gmail_watch_senders completed');
+}
+function runTasksMigration(db) {
+    const applied = db.prepare('SELECT name FROM migrations WHERE name = ?').get('015_tasks');
+    if (applied)
+        return;
+    logger.info('Running migration: 015_tasks');
+    const tasksTable = `
+    CREATE TABLE IF NOT EXISTS tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      jid TEXT NOT NULL,
+      title TEXT NOT NULL,
+      notes TEXT,
+      status TEXT DEFAULT 'pending' CHECK(status IN ('pending','done','snoozed')),
+      due_at INTEGER,
+      snooze_until INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      completed_at INTEGER
+    )
+  `;
+    db.exec(tasksTable);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_jid_status ON tasks(jid, status)');
+    db.prepare('INSERT INTO migrations (name) VALUES (?)').run('015_tasks');
+    logger.info('Migration 015_tasks completed');
 }
 function runGmailMigration(db) {
     const applied014 = db.prepare('SELECT name FROM migrations WHERE name = ?').get('014_gmail');

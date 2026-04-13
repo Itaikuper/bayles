@@ -82,6 +82,29 @@ export class GmailRepository {
     `).run(jid, messageId, Date.now());
   }
 
+  // --- Sender watch list ---
+
+  addWatchSender(jid: string, email: string): void {
+    const db = getDatabase();
+    db.prepare(`
+      INSERT INTO gmail_watch_senders (jid, email, created_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(jid, email) DO NOTHING
+    `).run(jid, email.toLowerCase(), Date.now());
+  }
+
+  removeWatchSender(jid: string, email: string): number {
+    const db = getDatabase();
+    const res = db.prepare('DELETE FROM gmail_watch_senders WHERE jid = ? AND email = ?').run(jid, email.toLowerCase());
+    return res.changes;
+  }
+
+  listWatchSenders(jid: string): string[] {
+    const db = getDatabase();
+    const rows = db.prepare('SELECT email FROM gmail_watch_senders WHERE jid = ?').all(jid) as { email: string }[];
+    return rows.map(r => r.email);
+  }
+
   pruneSeen(olderThanMs: number): number {
     const db = getDatabase();
     const cutoff = Date.now() - olderThanMs;

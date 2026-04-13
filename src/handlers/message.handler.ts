@@ -7,6 +7,7 @@ import { BirthdayService } from '../services/birthday.service.js';
 import { CalendarService } from '../services/calendar.service.js';
 import { GmailService } from '../services/gmail.service.js';
 import { getMemoryService } from '../services/memory.service.js';
+import { getTaskRepository } from '../database/repositories/task.repository.js';
 import { ChoreRotationService } from '../services/chore-rotation.service.js';
 import { ScheduleRepository } from '../database/repositories/schedule.repository.js';
 import { config } from '../config/env.js';
@@ -236,6 +237,8 @@ export class MessageHandler {
           actionSummary = await this.handleGmailFunction(jid, response.functionCall.name, response.functionCall.args as Record<string, unknown>, message);
         } else if (response.functionCall.name === 'search_memory' || response.functionCall.name === 'update_core_memory' || response.functionCall.name === 'append_person_note' || response.functionCall.name === 'append_project_note') {
           actionSummary = await this.handleMemoryFunction(jid, response.functionCall.name, response.functionCall.args as Record<string, unknown>, message);
+        } else if (response.functionCall.name === 'add_task' || response.functionCall.name === 'list_tasks' || response.functionCall.name === 'complete_task' || response.functionCall.name === 'snooze_task') {
+          actionSummary = await this.handleTaskFunction(jid, response.functionCall.name, response.functionCall.args as Record<string, unknown>, message);
         } else {
           // Unknown function call - log and ignore
           logger.warn(`Unknown function call: ${response.functionCall.name}`);
@@ -2010,6 +2013,98 @@ ${config.botPrefix} Tell me a joke
 /birthdays add איתי 5 פבר יהודה 25 מרץ`;
   }
 
+  private async handleTaskFunction(
+    jid: string,
+    name: string,
+    args: Record<string, unknown>,
+    message: proto.IWebMessageInfo
+  ): Promise<string | null> {
+    if (!this.gmailService || !this.gmailService.isOwner(jid)) {
+      await this.whatsapp.sendReply(jid, 'Tasks are restricted to the owner.', message);
+      return null;
+    }
+    const repo = getTaskRepository();
+    try {
+      switch (name) {
+        case 'add_task': {
+          const title = String(args.title || '').trim();
+          if (!title) {
+            await this.whatsapp.sendReply(jid, 'אין כותרת למשימה.', message);
+            return '[add_task: empty title]';
+          }
+          const dueIso = args.due_iso ? String(args.due_iso) : undefined;
+          const dueAt = dueIso ? Date.parse(dueIso) : undefined;
+          const task = repo.add(jid, title, { notes: args.notes ? String(args.notes) : undefined, dueAt: dueAt && !isNaN(dueAt) ? dueAt : undefined });
+          const dueStr = task.due_at ? ` (${new Date(task.due_at).toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' })})` : '';
+          await this.whatsapp.sendReply(jid, `✅ הוספתי משימה #${task.id}: ${task.title}${dueStr}`, message);
+          return `[add_task: #${task.id} ${title}]`;
+        }
+        case 'list_tasks': {
+          const filter = (args.filter as string | undefined) || 'active';
+          const status = filter === 'all' ? undefined : (filter as 'pending' | 'done' | 'snoozed' | 'active');
+          const tasks = repo.list(jid, status);
+          if (tasks.length === 0) {
+            await this.whatsapp.sendReply(jid, 'אין משימות פעילות. 🎉', message);
+            return '[list_tasks: 0]';
+          }
+          const text = tasks.slice(0, 20).map(t => {
+            const due = t.due_at ? ` · ${new Date(t.due_at).toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem', dateStyle: 'short', timeStyle: 'short' })}` : '';
+            const mark = t.status === 'done' ? '✓' : t.status === 'snoozed' ? '💤' : '◻️';
+            return `${mark} *#${t.id}* ${t.title}${due}`;
+          }).join('\n');
+          await this.whatsapp.sendReply(jid, `📋 משימות (${filter}):\n${text}`, message);
+          return `[list_tasks: ${tasks.length}]`;
+        }
+        case 'complete_task': {
+          let id = args.id ? Number(args.id) : undefined;
+          if (!id && args.query) {
+            const matches = repo.findByTitle(jid, String(args.query));
+            if (matches.length === 0) {
+              await this.whatsapp.sendReply(jid, `לא מצאתי משימה תואמת ל-"${args.query}".`, message);
+              return '[complete_task: no match]';
+            }
+            if (matches.length > 1) {
+              const list = matches.map(m => `#${m.id} ${m.title}`).join('\n');
+              await this.whatsapp.sendReply(jid, `מספר התאמות:\n${list}\nציין id מדויק.`, message);
+              return '[complete_task: ambiguous]';
+            }
+            id = matches[0].id;
+          }
+          if (!id) return '[complete_task: no id]';
+          const ok = repo.complete(id);
+          await this.whatsapp.sendReply(jid, ok ? `✅ #${id} סומן כ-done.` : `לא הצלחתי להשלים #${id}.`, message);
+          return `[complete_task: #${id} ok=${ok}]`;
+        }
+        case 'snooze_task': {
+          let id = args.id ? Number(args.id) : undefined;
+          if (!id && args.query) {
+            const matches = repo.findByTitle(jid, String(args.query));
+            if (matches.length === 1) id = matches[0].id;
+          }
+          if (!id) {
+            await this.whatsapp.sendReply(jid, 'ציין id של המשימה.', message);
+            return '[snooze_task: no id]';
+          }
+          const until = Date.parse(String(args.until_iso));
+          if (isNaN(until)) {
+            await this.whatsapp.sendReply(jid, 'until_iso לא תקין.', message);
+            return '[snooze_task: bad until_iso]';
+          }
+          const ok = repo.snooze(id, until);
+          await this.whatsapp.sendReply(jid, ok ? `💤 #${id} נדחתה ל-${new Date(until).toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' })}.` : `כשל.`, message);
+          return `[snooze_task: #${id} until=${until}]`;
+        }
+        default:
+          return null;
+      }
+    } catch (err) {
+      logger.error(`Task function ${name} failed:`, err);
+      const errMsg = err instanceof Error ? err.message : 'unknown error';
+      await this.whatsapp.sendReply(jid, `שגיאה ב-${name}: ${errMsg}`, message);
+      return `[${name}: error]`;
+    }
+  }
+
   private async handleMemoryFunction(
     jid: string,
     name: string,
@@ -2124,6 +2219,30 @@ ${config.botPrefix} Tell me a joke
             : 'תוויות במעקב:\n' + labels.map(l => `• ${l.label_name}`).join('\n');
           await this.whatsapp.sendReply(jid, text, message);
           return `[gmail_list_watch_labels: ${labels.length}]`;
+        }
+        case 'gmail_add_watch_sender': {
+          const email = String(args.email || '').trim().toLowerCase();
+          if (!email.includes('@')) {
+            await this.whatsapp.sendReply(jid, 'כתובת מייל לא תקינה.', message);
+            return '[gmail_add_watch_sender: bad email]';
+          }
+          this.gmailService.addWatchSender(jid, email);
+          await this.whatsapp.sendReply(jid, `✅ עוקב אחרי מיילים מ-${email}. בדיקה כל 7 דק'.`, message);
+          return `[gmail_add_watch_sender: ${email}]`;
+        }
+        case 'gmail_remove_watch_sender': {
+          const email = String(args.email || '').trim().toLowerCase();
+          const n = this.gmailService.removeWatchSender(jid, email);
+          await this.whatsapp.sendReply(jid, n > 0 ? `🗑 הפסקתי לעקוב אחרי ${email}.` : `${email} לא היה במעקב.`, message);
+          return `[gmail_remove_watch_sender: ${n}]`;
+        }
+        case 'gmail_list_watch_senders': {
+          const senders = this.gmailService.listWatchSenders(jid);
+          const text = senders.length === 0
+            ? 'אין שולחים במעקב.'
+            : 'שולחים במעקב:\n' + senders.map(s => `• ${s}`).join('\n');
+          await this.whatsapp.sendReply(jid, text, message);
+          return `[gmail_list_watch_senders: ${senders.length}]`;
         }
         default:
           logger.warn(`Unhandled gmail function: ${name}`);

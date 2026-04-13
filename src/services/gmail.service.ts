@@ -126,7 +126,8 @@ export class GmailService {
       const ownerJid = config.gmailOwnerJid;
       const repo = getGmailRepository();
       const labels = repo.listWatchLabels(ownerJid);
-      if (labels.length === 0) return;
+      const senders = repo.listWatchSenders(ownerJid);
+      if (labels.length === 0 && senders.length === 0) return;
 
       const credentials = repo.getCredentials(ownerJid);
       if (!credentials) {
@@ -136,6 +137,7 @@ export class GmailService {
 
       const gmail = await this.getGmailClient(ownerJid);
 
+      // Label-based queries
       for (const label of labels) {
         try {
           const list = await gmail.users.messages.list({
@@ -149,7 +151,7 @@ export class GmailService {
             if (!m.id) continue;
             if (repo.isSeen(ownerJid, m.id)) continue;
             try {
-              await this.notifyAboutMessage(gmail, ownerJid, m.id, label);
+              await this.notifyAboutMessage(gmail, ownerJid, m.id, label.label_name);
               repo.markSeen(ownerJid, m.id);
             } catch (err) {
               logger.error(`Failed to notify about message id=${m.id}:`, err);
@@ -157,6 +159,31 @@ export class GmailService {
           }
         } catch (err) {
           logger.error(`Failed to list messages for label ${label.label_name}:`, err);
+        }
+      }
+
+      // Sender-based query (single combined OR query)
+      if (senders.length > 0) {
+        try {
+          const fromClause = senders.map(e => `from:${e}`).join(' OR ');
+          const list = await gmail.users.messages.list({
+            userId: 'me',
+            q: `(${fromClause}) is:unread newer_than:1d`,
+            maxResults: MAX_MESSAGES_PER_POLL,
+          });
+          const messages = list.data.messages || [];
+          for (const m of messages) {
+            if (!m.id) continue;
+            if (repo.isSeen(ownerJid, m.id)) continue;
+            try {
+              await this.notifyAboutMessage(gmail, ownerJid, m.id, 'sender-watch');
+              repo.markSeen(ownerJid, m.id);
+            } catch (err) {
+              logger.error(`Failed to notify (sender) about message id=${m.id}:`, err);
+            }
+          }
+        } catch (err) {
+          logger.error('Failed to list messages by sender watch:', err);
         }
       }
 
@@ -171,7 +198,7 @@ export class GmailService {
     gmail: gmail_v1.Gmail,
     jid: string,
     messageId: string,
-    label: GmailWatchLabel
+    source: string
   ): Promise<void> {
     const msg = await gmail.users.messages.get({
       userId: 'me',
@@ -186,18 +213,17 @@ export class GmailService {
     const snippet = (msg.data.snippet || '').slice(0, 300);
 
     const text = [
-      `📧 *מייל חדש* (תווית: ${label.label_name})`,
+      `📧 *מייל חדש* (${source})`,
       `*מאת:* ${from}`,
       `*נושא:* ${subject}`,
       '',
       snippet,
       '',
-      `_כדי לענות: "נסח תשובה ל-${messageId.slice(0, 8)}"_`,
+      `_id: ${messageId}_`,
     ].join('\n');
 
     await this.whatsapp.sendTextMessage(jid, text);
-    // Log only non-sensitive fields
-    logger.info(`Gmail notified jid=${jid.slice(0, 6)}... label=${label.label_name} msgId=${messageId}`);
+    logger.info(`Gmail notified jid=${jid.slice(0, 6)}... source=${source} msgId=${messageId}`);
   }
 
   // --- Public read/write API (used by Gemini function handlers) ---
@@ -317,6 +343,21 @@ export class GmailService {
   listWatchLabels(jid: string): GmailWatchLabel[] {
     this.assertOwner(jid);
     return getGmailRepository().listWatchLabels(jid);
+  }
+
+  // --- Sender management (called from WhatsApp) ---
+
+  addWatchSender(jid: string, email: string): void {
+    this.assertOwner(jid);
+    getGmailRepository().addWatchSender(jid, email);
+  }
+  removeWatchSender(jid: string, email: string): number {
+    this.assertOwner(jid);
+    return getGmailRepository().removeWatchSender(jid, email);
+  }
+  listWatchSenders(jid: string): string[] {
+    this.assertOwner(jid);
+    return getGmailRepository().listWatchSenders(jid);
   }
 
   async listAllGmailLabels(jid: string): Promise<{ id: string; name: string }[]> {

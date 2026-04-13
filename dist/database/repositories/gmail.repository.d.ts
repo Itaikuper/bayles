@@ -21,5 +21,8 @@ export declare class GmailRepository {
     listWatchLabels(jid: string): GmailWatchLabel[];
     isSeen(jid: string, messageId: string): boolean;
     markSeen(jid: string, messageId: string): void;
+    addWatchSender(jid: string, email: string): void;
+    removeWatchSender(jid: string, email: string): number;
+    listWatchSenders(jid: string): string[];
     pruneSeen(olderThanMs: number): number;
 }

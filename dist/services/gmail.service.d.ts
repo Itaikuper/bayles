@@ -53,6 +53,9 @@ export declare class GmailService {
     }>;
     removeWatchLabel(jid: string, labelName: string): Promise<number>;
     listWatchLabels(jid: string): GmailWatchLabel[];
+    addWatchSender(jid: string, email: string): void;
+    removeWatchSender(jid: string, email: string): number;
+    listWatchSenders(jid: string): string[];
     listAllGmailLabels(jid: string): Promise<{
         id: string;
         name: string;

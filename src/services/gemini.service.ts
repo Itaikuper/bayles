@@ -362,6 +362,32 @@ const gmailListWatchLabelsDeclaration: FunctionDeclaration = {
   parameters: { type: Type.OBJECT, properties: {} },
 };
 
+const gmailAddWatchSenderDeclaration: FunctionDeclaration = {
+  name: 'gmail_add_watch_sender',
+  description: 'Watch a specific sender email address — the bot will notify on every new email from this address. Keywords: עקוב אחרי המיילים מ-, watch sender.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: { email: { type: Type.STRING } },
+    required: ['email'],
+  },
+};
+
+const gmailRemoveWatchSenderDeclaration: FunctionDeclaration = {
+  name: 'gmail_remove_watch_sender',
+  description: 'Stop watching a sender. Keywords: הפסק לעקוב אחרי, unwatch sender.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: { email: { type: Type.STRING } },
+    required: ['email'],
+  },
+};
+
+const gmailListWatchSendersDeclaration: FunctionDeclaration = {
+  name: 'gmail_list_watch_senders',
+  description: 'List which sender email addresses are being monitored.',
+  parameters: { type: Type.OBJECT, properties: {} },
+};
+
 // --- Memory (owner mode) ---
 const searchMemoryDeclaration: FunctionDeclaration = {
   name: 'search_memory',
@@ -412,6 +438,58 @@ const appendProjectNoteDeclaration: FunctionDeclaration = {
       note: { type: Type.STRING, description: 'The note text.' },
     },
     required: ['project', 'note'],
+  },
+};
+
+// --- Tasks (owner mode) ---
+const addTaskDeclaration: FunctionDeclaration = {
+  name: 'add_task',
+  description: 'Add a task / TODO. Use when the owner says "תזכיר לי", "אני צריך", "תוסיף משימה", "remind me to", "I need to", or otherwise asks to track something to do. If a due date/time is given, set due_iso to ISO 8601.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      title: { type: Type.STRING, description: 'Short task title in Hebrew.' },
+      due_iso: { type: Type.STRING, description: 'Optional due time in ISO 8601 (e.g. 2026-04-14T10:00:00+03:00). Leave empty if no time given.' },
+      notes: { type: Type.STRING, description: 'Optional longer notes.' },
+    },
+    required: ['title'],
+  },
+};
+
+const listTasksDeclaration: FunctionDeclaration = {
+  name: 'list_tasks',
+  description: 'List the owner\'s tasks. Use when asked "מה המשימות שלי?", "what\'s on my list?", "מה יש לי לעשות?".',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      filter: { type: Type.STRING, description: 'Optional filter: "active" (default — pending+due-snoozed), "pending", "done", "snoozed", or "all".' },
+    },
+  },
+};
+
+const completeTaskDeclaration: FunctionDeclaration = {
+  name: 'complete_task',
+  description: 'Mark a task as done. Provide either id (preferred) or query (substring of title). Use when the owner says "סיימתי X", "X done", "תסמן את X".',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      id: { type: Type.NUMBER, description: 'Task id (preferred).' },
+      query: { type: Type.STRING, description: 'Substring of the task title — used if id is unknown.' },
+    },
+  },
+};
+
+const snoozeTaskDeclaration: FunctionDeclaration = {
+  name: 'snooze_task',
+  description: 'Snooze a task until later. Provide id or query, plus until_iso (ISO 8601).',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      id: { type: Type.NUMBER },
+      query: { type: Type.STRING },
+      until_iso: { type: Type.STRING, description: 'When to surface again, ISO 8601.' },
+    },
+    required: ['until_iso'],
   },
 };
 
@@ -546,11 +624,18 @@ Messages in [brackets] in conversation history are factual records of actions yo
           gmailAddWatchLabelDeclaration,
           gmailRemoveWatchLabelDeclaration,
           gmailListWatchLabelsDeclaration,
+          gmailAddWatchSenderDeclaration,
+          gmailRemoveWatchSenderDeclaration,
+          gmailListWatchSendersDeclaration,
           createScheduleDeclaration,
           searchMemoryDeclaration,
           updateCoreMemoryDeclaration,
           appendPersonNoteDeclaration,
           appendProjectNoteDeclaration,
+          addTaskDeclaration,
+          listTasksDeclaration,
+          completeTaskDeclaration,
+          snoozeTaskDeclaration,
         );
       } else {
         // Default mode: existing keyword-gated tool selection.
