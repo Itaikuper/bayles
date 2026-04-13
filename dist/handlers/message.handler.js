@@ -1,3 +1,4 @@
+import { getMemoryService } from '../services/memory.service.js';
 import { ScheduleRepository } from '../database/repositories/schedule.repository.js';
 import { config } from '../config/env.js';
 import { logger } from '../utils/logger.js';
@@ -199,6 +200,9 @@ export class MessageHandler {
                 }
                 else if (response.functionCall.name?.startsWith('gmail_')) {
                     actionSummary = await this.handleGmailFunction(jid, response.functionCall.name, response.functionCall.args, message);
+                }
+                else if (response.functionCall.name === 'search_memory' || response.functionCall.name === 'update_core_memory' || response.functionCall.name === 'append_person_note' || response.functionCall.name === 'append_project_note') {
+                    actionSummary = await this.handleMemoryFunction(jid, response.functionCall.name, response.functionCall.args, message);
                 }
                 else {
                     // Unknown function call - log and ignore
@@ -1464,6 +1468,57 @@ ${config.botPrefix} Tell me a joke
 /image a cat sitting on the moon
 ייצר תמונה של חתול על הירח
 /birthdays add איתי 5 פבר יהודה 25 מרץ`;
+    }
+    async handleMemoryFunction(jid, name, args, message) {
+        if (!this.gmailService || !this.gmailService.isOwner(jid)) {
+            // Memory tools are owner-only (mirrors gmail gating)
+            await this.whatsapp.sendReply(jid, 'Memory tools are restricted to the owner.', message);
+            return null;
+        }
+        const mem = getMemoryService();
+        try {
+            switch (name) {
+                case 'search_memory': {
+                    const query = String(args.query || '');
+                    const category = (args.category === 'people' || args.category === 'projects') ? args.category : undefined;
+                    const hits = await mem.search(query, category);
+                    if (hits.length === 0) {
+                        await this.whatsapp.sendReply(jid, `לא נמצא דבר ב-memory עבור "${query}".`, message);
+                        return `[search_memory: 0 results for ${query}]`;
+                    }
+                    const text = hits.slice(0, 5).map(h => `📁 *${h.category}/${h.slug}*\n${h.excerpt.slice(0, 250)}`).join('\n\n');
+                    await this.whatsapp.sendReply(jid, text, message);
+                    return `[search_memory: ${hits.length} hits for ${query}]`;
+                }
+                case 'update_core_memory': {
+                    const section = String(args.section || 'Notes');
+                    const fact = String(args.fact || '').trim();
+                    if (!fact)
+                        return '[update_core_memory: empty fact ignored]';
+                    await mem.addFact(section, fact);
+                    await this.whatsapp.sendReply(jid, `🧠 שמרתי בזיכרון תחת "${section}".`, message);
+                    return `[update_core_memory: ${section} += ${fact}]`;
+                }
+                case 'append_person_note': {
+                    const slug = await mem.appendPersonNote(String(args.person || ''), String(args.note || ''));
+                    await this.whatsapp.sendReply(jid, `📝 הוספתי הערה ל-people/${slug}.`, message);
+                    return `[append_person_note: ${slug}]`;
+                }
+                case 'append_project_note': {
+                    const slug = await mem.appendProjectNote(String(args.project || ''), String(args.note || ''));
+                    await this.whatsapp.sendReply(jid, `📝 הוספתי הערה ל-projects/${slug}.`, message);
+                    return `[append_project_note: ${slug}]`;
+                }
+                default:
+                    return null;
+            }
+        }
+        catch (err) {
+            logger.error(`Memory function ${name} failed:`, err);
+            const errMsg = err instanceof Error ? err.message : 'unknown error';
+            await this.whatsapp.sendReply(jid, `שגיאה ב-${name}: ${errMsg}`, message);
+            return `[${name}: error]`;
+        }
     }
     async handleGmailFunction(jid, name, args, message) {
         if (!this.gmailService || !this.gmailService.isOwner(jid)) {

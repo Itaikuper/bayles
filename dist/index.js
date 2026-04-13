@@ -6,6 +6,7 @@ import { BirthdayService } from './services/birthday.service.js';
 import { CompactionService } from './services/compaction.service.js';
 import { CalendarService } from './services/calendar.service.js';
 import { GmailService } from './services/gmail.service.js';
+import { getMemoryService } from './services/memory.service.js';
 import { ChoreRotationService } from './services/chore-rotation.service.js';
 import { getBotControlService } from './services/bot-control.service.js';
 import { MessageHandler } from './handlers/message.handler.js';
@@ -78,6 +79,13 @@ async function main() {
             catch (err) {
                 logger.warn('GmailService failed to initialize (gmail features disabled):', err);
                 gmailService = undefined;
+            }
+            // Initialize memory layout for the owner (markdown files on disk)
+            try {
+                await getMemoryService().ensureLayout();
+            }
+            catch (err) {
+                logger.warn('MemoryService layout init failed:', err);
             }
         }
         else {

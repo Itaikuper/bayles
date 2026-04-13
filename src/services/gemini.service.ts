@@ -10,6 +10,7 @@ import { getKnowledgeRepository } from '../database/repositories/knowledge.repos
 import { getUserMemoryRepository } from '../database/repositories/user-memory.repository.js';
 import { getConversationHistoryRepository } from '../database/repositories/conversation-history.repository.js';
 import { getChatConfigRepository } from '../database/repositories/chat-config.repository.js';
+import { getMemoryService } from './memory.service.js';
 import type { ChatHistory, GeminiResponse } from '../types/index.js';
 
 // Function declaration for natural language scheduling
@@ -361,6 +362,59 @@ const gmailListWatchLabelsDeclaration: FunctionDeclaration = {
   parameters: { type: Type.OBJECT, properties: {} },
 };
 
+// --- Memory (owner mode) ---
+const searchMemoryDeclaration: FunctionDeclaration = {
+  name: 'search_memory',
+  description: 'Search the persistent memory (people and project notes) for what we know about someone or something. Use whenever the owner mentions a name or project you might have notes on.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      query: { type: Type.STRING, description: 'Keyword(s) to search for, e.g. a person name or project name.' },
+      category: { type: Type.STRING, description: 'Optional: "people" or "projects" to limit the search.' },
+    },
+    required: ['query'],
+  },
+};
+
+const updateCoreMemoryDeclaration: FunctionDeclaration = {
+  name: 'update_core_memory',
+  description: 'Add a durable fact (lasts 30+ days) to the always-loaded core memory under a section heading. Use when the owner reveals a preference, identity detail, standing instruction, or new active project. Examples: section="Preferences", fact="הוא מעדיף פגישות אחרי 10 בבוקר".',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      section: { type: Type.STRING, description: 'Section heading inside core.md, e.g. "Preferences", "Active projects", "Key people", "Standing instructions".' },
+      fact: { type: Type.STRING, description: 'A single short bullet line. The bot will prepend "- " automatically.' },
+    },
+    required: ['section', 'fact'],
+  },
+};
+
+const appendPersonNoteDeclaration: FunctionDeclaration = {
+  name: 'append_person_note',
+  description: 'Append a dated note to a person\'s profile file. Use after a meeting or when the owner shares context about someone.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      person: { type: Type.STRING, description: 'Person name or email.' },
+      note: { type: Type.STRING, description: 'The note text. Keep it short.' },
+    },
+    required: ['person', 'note'],
+  },
+};
+
+const appendProjectNoteDeclaration: FunctionDeclaration = {
+  name: 'append_project_note',
+  description: 'Append a dated note to a project\'s file. Use to log decisions, status updates, or links related to an active project.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      project: { type: Type.STRING, description: 'Project name.' },
+      note: { type: Type.STRING, description: 'The note text.' },
+    },
+    required: ['project', 'note'],
+  },
+};
+
 export class GeminiService {
   private ai: GoogleGenAI;
   private conversationHistory: Map<string, ChatHistory[]> = new Map();
@@ -441,8 +495,19 @@ export class GeminiService {
       // Owner mode: focused personal-assistant prompt, no image instructions, no knowledge-base noise.
       // Default mode: existing behavior (custom prompt + knowledge + image instructions).
       const imageInstructions = mode === 'owner' ? '' : this.getImageInstructions();
+      let ownerMemorySection = '';
+      if (mode === 'owner') {
+        try {
+          const memSvc = getMemoryService();
+          const core = await memSvc.readCore();
+          const daily = await memSvc.readRecentDaily(2);
+          ownerMemorySection = `\n\n<CORE_MEMORY>\n${core.trim()}\n</CORE_MEMORY>\n\n<RECENT_DAYS>\n${daily || '(no recent notes)'}\n</RECENT_DAYS>`;
+        } catch (err) {
+          logger.warn('MemoryService failed to load owner memory:', err);
+        }
+      }
       const baseIdentity = mode === 'owner'
-        ? `You are Itai's personal assistant. Hebrew by default. Concise and direct — no filler, no small talk. Replies ≤150 words unless asked for detail. NEVER generate images unless the user explicitly invokes /image or /proimage. When asked anything that maps to a tool (mail, calendar, tasks, memory), CALL THE TOOL — never guess, never say "I don't have access".`
+        ? `You are Itai's personal assistant. Hebrew by default. Concise and direct — no filler, no small talk. Replies ≤150 words unless asked for detail. NEVER generate images unless the user explicitly invokes /image or /proimage. When asked anything that maps to a tool (mail, calendar, tasks, memory), CALL THE TOOL — never guess, never say "I don't have access". When the owner reveals a durable preference, identity detail, or active project, call update_core_memory. After meetings or when context is shared about a person/project, call append_person_note / append_project_note.${ownerMemorySection}`
         : (customPrompt || config.systemPrompt);
       const systemPrompt = baseIdentity + knowledgeContext + userMemories + summaries + imageInstructions + privacyGuardrail;
 
@@ -482,6 +547,10 @@ Messages in [brackets] in conversation history are factual records of actions yo
           gmailRemoveWatchLabelDeclaration,
           gmailListWatchLabelsDeclaration,
           createScheduleDeclaration,
+          searchMemoryDeclaration,
+          updateCoreMemoryDeclaration,
+          appendPersonNoteDeclaration,
+          appendProjectNoteDeclaration,
         );
       } else {
         // Default mode: existing keyword-gated tool selection.

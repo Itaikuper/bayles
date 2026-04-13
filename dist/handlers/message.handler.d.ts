@@ -85,5 +85,6 @@ export declare class MessageHandler {
     private extractImagePrompt;
     private handleImageGeneration;
     private getHelpText;
+    private handleMemoryFunction;
     private handleGmailFunction;
 }
