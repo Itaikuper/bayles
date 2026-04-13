@@ -361,19 +361,41 @@ function extractPlainBody(part) {
     }
     return '';
 }
+function detectDir(text) {
+    // Hebrew range U+0590-U+05FF, Arabic U+0600-U+06FF + U+0750-U+077F, U+FB50-U+FDFF, U+FE70-U+FEFF
+    const rtlChars = text.match(/[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/g)?.length || 0;
+    const letters = text.match(/[\p{L}]/gu)?.length || 0;
+    if (letters === 0)
+        return 'ltr';
+    return rtlChars / letters > 0.3 ? 'rtl' : 'ltr';
+}
+function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function plainToHtml(body, dir) {
+    const escaped = escapeHtml(body);
+    // Preserve double-newlines as paragraph breaks, single newlines as <br>
+    const paragraphs = escaped
+        .split(/\n{2,}/)
+        .map(p => `<p style="margin:0 0 1em 0;text-align:${dir === 'rtl' ? 'right' : 'left'};">${p.replace(/\n/g, '<br>')}</p>`)
+        .join('\n');
+    return `<div dir="${dir}" style="text-align:${dir === 'rtl' ? 'right' : 'left'};">${paragraphs}</div>`;
+}
 function buildMime(opts) {
+    const dir = detectDir(opts.body);
+    const htmlBody = plainToHtml(opts.body, dir);
     const headers = [
         `To: ${opts.to}`,
         `Subject: =?UTF-8?B?${Buffer.from(opts.subject, 'utf-8').toString('base64')}?=`,
         'MIME-Version: 1.0',
-        'Content-Type: text/plain; charset="UTF-8"',
+        'Content-Type: text/html; charset="UTF-8"',
         'Content-Transfer-Encoding: 8bit',
     ];
     if (opts.inReplyTo)
         headers.push(`In-Reply-To: ${opts.inReplyTo}`);
     if (opts.references)
         headers.push(`References: ${opts.references}`);
-    return `${headers.join('\r\n')}\r\n\r\n${opts.body}`;
+    return `${headers.join('\r\n')}\r\n\r\n${htmlBody}`;
 }
 let instance = null;
 export function getGmailServiceInstance() {
