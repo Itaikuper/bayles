@@ -325,12 +325,12 @@ const gmailReadEmailDeclaration: FunctionDeclaration = {
 
 const gmailDraftReplyDeclaration: FunctionDeclaration = {
   name: 'gmail_draft_reply',
-  description: 'Create a DRAFT reply to an EXISTING Gmail message (never sends). Use when the owner asks to reply/respond to a mail. Keywords: נסח תשובה, ענה, השב, draft reply.',
+  description: 'Create a DRAFT reply to an EXISTING Gmail message (never sends). Before calling, if you do not have the original message body in context, call gmail_read_email(messageId) first so your reply is grounded in what they actually wrote.\n\nBody: greeting by the sender\'s first name, substantive content (answer, action plan, or acknowledgment), closing line, blank line, signature from core memory. Match the language of the original email. No "AI-generated" disclaimers.',
   parameters: {
     type: Type.OBJECT,
     properties: {
       messageId: { type: Type.STRING, description: 'Gmail id of the message to reply to.' },
-      body: { type: Type.STRING, description: 'Body text of the reply, in the requested language (usually Hebrew).' },
+      body: { type: Type.STRING, description: 'Full reply body including greeting + content + closing + signature. Use real newlines.' },
     },
     required: ['messageId', 'body'],
   },
@@ -338,13 +338,13 @@ const gmailDraftReplyDeclaration: FunctionDeclaration = {
 
 const gmailDraftNewDeclaration: FunctionDeclaration = {
   name: 'gmail_draft_new',
-  description: 'Create a DRAFT of a brand-new email (not a reply; no existing thread). Never sends. Use when the owner asks to compose/draft a new mail to someone. Keywords: נסח מייל, תכתוב מייל חדש, טיוטה חדשה, שלח מייל ל (the bot still only drafts — does not send), compose new email, draft new mail.',
+  description: 'Create a DRAFT of a brand-new email (not a reply; no existing thread). Never sends. Before calling this, you should have already called gmail_list_recent_emails for this recipient to check context — if the current task is clearly a follow-up to an existing thread, use gmail_draft_reply instead.\n\nSubject: short, specific, professional. Body: greeting by name, 1–3 paragraphs of substance, closing line, blank line, then the signature from the "Email signature" section of core memory (e.g. "Best regards,\\nItai Kuperstoch"). No "AI-generated" disclaimers. Match the language of the most recent thread with the recipient; default to English for business unless Itai asked for Hebrew.',
   parameters: {
     type: Type.OBJECT,
     properties: {
       to: { type: Type.STRING, description: 'Recipient email address. Accept "Name <addr@x.com>" or plain "addr@x.com".' },
-      subject: { type: Type.STRING, description: 'Subject line.' },
-      body: { type: Type.STRING, description: 'Body text in the language Itai asked for (default Hebrew).' },
+      subject: { type: Type.STRING, description: 'Subject line — specific, not generic "Update".' },
+      body: { type: Type.STRING, description: 'Full email body including greeting + content + closing + signature. Use real newlines. Do NOT repeat the subject inside the body.' },
     },
     required: ['to', 'subject', 'body'],
   },
@@ -599,7 +599,18 @@ export class GeminiService {
         }
       }
       const baseIdentity = mode === 'owner'
-        ? `You are Itai's personal assistant. Hebrew by default. Concise and direct — no filler, no small talk. Replies ≤150 words unless asked for detail. NEVER generate images unless the user explicitly invokes /image or /proimage. When asked anything that maps to a tool (mail, calendar, tasks, memory), CALL THE TOOL — never guess, never say "I don't have access". When the owner reveals a durable preference, identity detail, or active project, call update_core_memory. After meetings or when context is shared about a person/project, call append_person_note / append_project_note.${ownerMemorySection}`
+        ? `You are Itai's executive assistant. You operate like a real EA at a senior manager — Itai gives short task instructions, you execute them with care, fluently and professionally. Default language: Hebrew. Replies to Itai are concise (≤150 words) and in his language. NEVER generate images unless he explicitly invokes /image or /proimage.
+
+When asked anything that maps to a tool (mail, calendar, tasks, memory), CALL THE TOOL — never guess, never say "I don't have access".
+
+EMAIL DRAFTING RULES (critical — you draft, never send):
+1. Before drafting ANY email to a named recipient (new or reply), first call gmail_list_recent_emails with q="from:<email> OR to:<email>" (max=5) to inspect recent thread context. If there is a relevant prior thread that looks like the same topic, prefer gmail_draft_reply to that message instead of gmail_draft_new.
+2. Choose the email language based on the RECIPIENT: match the language of their most recent correspondence with Itai. If no prior context, default to the language Itai used in the task instruction, and if Itai wrote in Hebrew default to professional English for business contacts unless Itai specified otherwise.
+3. Structure: clear Subject (specific, no "Update" alone), greeting by name ("Dear <FirstName>," / "היי <שם>,"), 1–3 short paragraphs with the actual ask or info, closing line (e.g., "Please let me know if you need anything else."), and the signature from core memory ("## Email signature" section). NEVER skip the signature.
+4. Tone: polite, direct, professional; no filler; no emojis in business email unless the thread uses them; no exclamation marks unless warranted.
+5. After creating the draft, reply to Itai in Hebrew with a one-line summary: draftId, recipient, subject — so he can open Gmail Drafts and review before sending.
+
+When Itai reveals a durable preference, identity detail, or active project, call update_core_memory. After meetings or when context is shared about a person/project, call append_person_note / append_project_note.${ownerMemorySection}`
         : (customPrompt || config.systemPrompt);
       const systemPrompt = baseIdentity + knowledgeContext + userMemories + summaries + imageInstructions + privacyGuardrail;
 

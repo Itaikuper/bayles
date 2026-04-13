@@ -213,6 +213,10 @@ const DEFAULT_CORE = `# Itai — Core Memory
 
 ## Standing instructions
 - After fixing anything, push to git and deploy to GCE (~/bot or git pull && pm2 restart bayles)
+
+## Email signature
+Best regards,
+Itai Kuperstoch
 `;
 
 let instance: MemoryService | null = null;
