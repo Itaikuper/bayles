@@ -5,6 +5,11 @@ export declare class GeminiService {
     private maxHistoryLength;
     constructor();
     private getImageInstructions;
+    /**
+     * Returns the assistant mode for a given chat. Owner DM gets a focused personal-assistant prompt
+     * with eager tool use and no image auto-generation. Default chats keep current behavior.
+     */
+    private getAssistantMode;
     generateResponse(jid: string, userMessage: string, customPrompt?: string, tenantId?: string, senderJid?: string): Promise<GeminiResponse>;
     generateAudioResponse(jid: string, audioBuffer: Buffer, mimeType: string, customPrompt?: string, contextPrefix?: string, tenantId?: string, senderJid?: string): Promise<string>;
     transcribeAudio(audioBuffer: Buffer, mimeType: string): Promise<string>;

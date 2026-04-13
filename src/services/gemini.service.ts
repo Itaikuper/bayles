@@ -398,15 +398,28 @@ export class GeminiService {
 4. מקסימום תגית אחת בתשובה.`;
   }
 
+  /**
+   * Returns the assistant mode for a given chat. Owner DM gets a focused personal-assistant prompt
+   * with eager tool use and no image auto-generation. Default chats keep current behavior.
+   */
+  private getAssistantMode(jid: string, senderJid?: string): 'owner' | 'default' {
+    if (!config.gmailOwnerJid) return 'default';
+    if (jid === config.gmailOwnerJid) return 'owner';
+    if (senderJid === config.gmailOwnerJid && !jid.endsWith('@g.us')) return 'owner';
+    return 'default';
+  }
+
   async generateResponse(jid: string, userMessage: string, customPrompt?: string, tenantId: string = 'default', senderJid?: string): Promise<GeminiResponse> {
     try {
+      const mode = this.getAssistantMode(jid, senderJid);
+
       // Get or initialize conversation history (scoped by tenant)
       const historyKey = `${tenantId}:${jid}`;
       const history = this.conversationHistory.get(historyKey) ?? this.loadHistoryFromDb(historyKey, jid, tenantId);
 
-      // Get knowledge base for this chat
+      // Get knowledge base for this chat (skipped in owner mode — handled by MemoryService in later step)
       const knowledgeRepo = getKnowledgeRepository();
-      const knowledgeContext = knowledgeRepo.getFormattedKnowledge(jid);
+      const knowledgeContext = mode === 'owner' ? '' : knowledgeRepo.getFormattedKnowledge(jid);
 
       // Get user memories for the sender (only if enabled for this chat)
       const chatConfigRepo = getChatConfigRepository();
@@ -425,87 +438,89 @@ export class GeminiService {
         ? '\n\nCRITICAL PRIVACY RULE: You must NEVER reveal, share, or reference any personal information about any user — not from memory, not from conversation history, not from summaries. If asked "what do you know about me" or similar, respond that you don\'t store personal information in this chat. This rule overrides all other instructions.'
         : '';
 
-      // Use custom prompt if provided, otherwise use default, plus knowledge + memories + summaries
-      const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + userMemories + summaries + this.getImageInstructions() + privacyGuardrail;
+      // Owner mode: focused personal-assistant prompt, no image instructions, no knowledge-base noise.
+      // Default mode: existing behavior (custom prompt + knowledge + image instructions).
+      const imageInstructions = mode === 'owner' ? '' : this.getImageInstructions();
+      const baseIdentity = mode === 'owner'
+        ? `You are Itai's personal assistant. Hebrew by default. Concise and direct — no filler, no small talk. Replies ≤150 words unless asked for detail. NEVER generate images unless the user explicitly invokes /image or /proimage. When asked anything that maps to a tool (mail, calendar, tasks, memory), CALL THE TOOL — never guess, never say "I don't have access".`
+        : (customPrompt || config.systemPrompt);
+      const systemPrompt = baseIdentity + knowledgeContext + userMemories + summaries + imageInstructions + privacyGuardrail;
 
       // Get today's date for scheduling context
       const today = new Date();
       const dateContext = `Today is ${today.toISOString().split('T')[0]} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][today.getDay()]}).`;
 
-      // Capability context so the model knows what it can do and trusts action records
-      const isGmailOwnerForContext = Boolean(config.gmailOwnerJid) && (senderJid === config.gmailOwnerJid || jid === config.gmailOwnerJid);
-      const gmailCapabilityLine = isGmailOwnerForContext
-        ? `\nYou DO have access to this user's Gmail inbox (read-only + draft creation). Use gmail_list_recent_emails to check mail, gmail_read_email to read a message, gmail_draft_reply to compose a draft (never sends). CRITICAL: if the user asks anything about their email/inbox/mail ("מה המצב במייל", "יש לי מיילים חדשים?", "check my inbox", "נסח תשובה ל...") you MUST call the appropriate gmail_* function — never answer "I don't have access". You cannot send email, only draft.`
-        : '';
-      const capabilityContext = `
+      // Capability context — differs per mode.
+      const capabilityContext = mode === 'owner'
+        ? `
+You have these tools for Itai's private assistant mode:
+- Calendar: list_calendar_events, create_calendar_event, update_calendar_event, delete_calendar_event
+- Gmail (read + drafts only, NEVER send): gmail_list_recent_emails, gmail_read_email, gmail_draft_reply, gmail_add_watch_label, gmail_remove_watch_label, gmail_list_watch_labels
+- Scheduled reminders: create_schedule
+Rules: Call tools eagerly. If the user asks about their schedule/meetings/mail/drafts in ANY phrasing, CALL THE TOOL. Never respond with "I don't have access" — you do have access. Messages in [brackets] in history are records of actions you performed; trust them.`
+        : `
 You have real capabilities through function calling: send messages to other people (send_message), schedule messages (create_schedule), search songs (search_song), search contacts (search_contact), search Hoshaya village phone directory (search_hoshaya_directory), manage calendar events, and manage family chore rotations (manage_chore_rotation).
-CRITICAL: For ANY phone number or contact lookup, you MUST call search_hoshaya_directory. NEVER answer phone queries from memory or conversation history. You do NOT know any phone numbers - always call the function.${gmailCapabilityLine}
+CRITICAL: For ANY phone number or contact lookup, you MUST call search_hoshaya_directory. NEVER answer phone queries from memory or conversation history. You do NOT know any phone numbers - always call the function.
 Messages in [brackets] in conversation history are factual records of actions you performed. Trust them completely — if it says [שלחתי הודעה ל...], you DID send that message. Never deny or contradict these records.`;
 
-      // Only enable function calling when message matches known patterns
-      // Otherwise use googleSearch for regular queries (weather, current events, etc.)
-      // Note: googleSearch and functionDeclarations DON'T work together (known SDK bug)
-      const schedulingKeywords = /תזמן|תזכיר|תשלח בשעה|כל יום|מחר בשעה|schedule|remind|תקבע|הזכר לי|בשעה \d/i;
-      const songKeywords = /שיר|אקורד|טאב|גיטרה|chord|song|tab|לנגן|תנגן|אקורד/i;
-      const contactKeywords = /טלפון|פלאפון|מספר של|איש קשר|phone|contact|number/i;
-      const hoshayaDirectoryKeywords = /הושעיה|טלפון של|מספר של|ספר טלפונים|מי גר ב|תושב|טלפון|פלאפון|מספר של|איש קשר|phone|contact|number/i;
-      const calendarKeywords = /מה יש לי|יומן|אירוע|פגישה|לוח|לוז|תוסיף אירוע|תקבע פגישה|תכניס ליומן|תמחק אירוע|תבטל פגישה|תשנה אירוע|תזיז|תעדכן אירוע|calendar|events|meeting|schedule|agenda/i;
-      const sendMessageKeywords = /תשלח ל|שלח ל|שלח .{1,30} ל|לשלוח ל|לשלוח .{1,30} ל|לשלוח הודעה|תגיד ל|תודיע ל|תעביר ל|הודעה ל|send to|send .{1,30} to|tell .+ that|forward to|למספר \d/i;
-      const choreKeywords = /תורנות|תורנויות|תור של|מי היום|של מי (ה|ל)?|מדיח|אשפה|ניקיון|מי מפנה|מי מכניס|מה התור|chore|rotation|duty/i;
-      const isSchedulingRequest = schedulingKeywords.test(userMessage);
-      const isSongRequest = songKeywords.test(userMessage);
-      const isContactRequest = contactKeywords.test(userMessage);
-      const isHoshayaDirectoryRequest = hoshayaDirectoryKeywords.test(userMessage);
-      const isCalendarRequest = calendarKeywords.test(userMessage);
-      const isSendMessageRequest = sendMessageKeywords.test(userMessage);
-      const isChoreRequest = choreKeywords.test(userMessage);
-      // Also check if recent history has a hoshaya directory search (for follow-up queries like just a name)
-      const toolHistoryKey = `${tenantId}:${jid}`;
-      const recentHistory = this.conversationHistory.get(toolHistoryKey) ?? [];
-      const hasRecentDirectorySearch = recentHistory.slice(-4).some(m =>
-        m.role === 'model' && m.parts?.some(p => (p as { text?: string }).text?.includes('חיפשתי בספר הטלפונים של הושעיה'))
-      );
-      // Build function declarations filtered by per-chat allowed_tools setting
       const allowedTools = chatConfigRepo.getAllowedTools(jid);
       const isAllowed = (toolName: string) => allowedTools === null || allowedTools.includes(toolName);
-
       const functionDeclarations: FunctionDeclaration[] = [];
-      if (isSchedulingRequest && isAllowed('create_schedule')) functionDeclarations.push(createScheduleDeclaration);
-      if (isSongRequest && isAllowed('search_song')) functionDeclarations.push(searchSongDeclaration);
-      if (isContactRequest && isAllowed('search_contact')) functionDeclarations.push(searchContactDeclaration);
-      if ((isHoshayaDirectoryRequest || hasRecentDirectorySearch) && isAllowed('search_hoshaya_directory')) functionDeclarations.push(searchHoshayaDirectoryDeclaration);
-      if (isCalendarRequest && isAllowed('list_calendar_events')) {
+
+      if (mode === 'owner') {
+        // Owner mode: always include the full personal-assistant tool set. No keyword regex gates.
+        // Let Gemini decide when to call each tool based on the message + system prompt.
         functionDeclarations.push(
           listCalendarEventsDeclaration,
           createCalendarEventDeclaration,
           updateCalendarEventDeclaration,
-          deleteCalendarEventDeclaration
+          deleteCalendarEventDeclaration,
+          gmailListRecentDeclaration,
+          gmailReadEmailDeclaration,
+          gmailDraftReplyDeclaration,
+          gmailAddWatchLabelDeclaration,
+          gmailRemoveWatchLabelDeclaration,
+          gmailListWatchLabelsDeclaration,
+          createScheduleDeclaration,
         );
-      }
-      if (isSendMessageRequest && isAllowed('send_message')) functionDeclarations.push(sendMessageDeclaration);
-      if (isChoreRequest && isAllowed('manage_chore_rotation')) functionDeclarations.push(manageChoreRotationDeclaration);
+      } else {
+        // Default mode: existing keyword-gated tool selection.
+        const schedulingKeywords = /תזמן|תזכיר|תשלח בשעה|כל יום|מחר בשעה|schedule|remind|תקבע|הזכר לי|בשעה \d/i;
+        const songKeywords = /שיר|אקורד|טאב|גיטרה|chord|song|tab|לנגן|תנגן|אקורד/i;
+        const contactKeywords = /טלפון|פלאפון|מספר של|איש קשר|phone|contact|number/i;
+        const hoshayaDirectoryKeywords = /הושעיה|טלפון של|מספר של|ספר טלפונים|מי גר ב|תושב|טלפון|פלאפון|מספר של|איש קשר|phone|contact|number/i;
+        const calendarKeywords = /מה יש לי|יומן|אירוע|פגיש|לוח|לוז|תוסיף אירוע|תקבע פגישה|תכניס ליומן|תמחק אירוע|תבטל פגישה|תשנה אירוע|תזיז|תעדכן אירוע|calendar|events|meeting|schedule|agenda/i;
+        const sendMessageKeywords = /תשלח ל|שלח ל|שלח .{1,30} ל|לשלוח ל|לשלוח .{1,30} ל|לשלוח הודעה|תגיד ל|תודיע ל|תעביר ל|הודעה ל|send to|send .{1,30} to|tell .+ that|forward to|למספר \d/i;
+        const choreKeywords = /תורנות|תורנויות|תור של|מי היום|של מי (ה|ל)?|מדיח|אשפה|ניקיון|מי מפנה|מי מכניס|מה התור|chore|rotation|duty/i;
+        const toolHistoryKey = `${tenantId}:${jid}`;
+        const recentHistory = this.conversationHistory.get(toolHistoryKey) ?? [];
+        const hasRecentDirectorySearch = recentHistory.slice(-4).some(m =>
+          m.role === 'model' && m.parts?.some(p => (p as { text?: string }).text?.includes('חיפשתי בספר הטלפונים של הושעיה'))
+        );
 
-      // Gmail tools: owner JID only. senderJid check mirrors the service-side guard.
-      const isGmailOwner = Boolean(config.gmailOwnerJid) && (senderJid === config.gmailOwnerJid || jid === config.gmailOwnerJid);
-      if (isGmailOwner) {
-        const gmailKeywords = /מייל|מיילים|במייל|gmail|email|inbox|תיבת דואר|דואר|דוא"ל|תווית|טיוטה|נסח תשובה|draft|label|לקרוא|סכם את|תענה ל|השב ל/i;
-        if (gmailKeywords.test(userMessage)) {
+        if (schedulingKeywords.test(userMessage) && isAllowed('create_schedule')) functionDeclarations.push(createScheduleDeclaration);
+        if (songKeywords.test(userMessage) && isAllowed('search_song')) functionDeclarations.push(searchSongDeclaration);
+        if (contactKeywords.test(userMessage) && isAllowed('search_contact')) functionDeclarations.push(searchContactDeclaration);
+        if ((hoshayaDirectoryKeywords.test(userMessage) || hasRecentDirectorySearch) && isAllowed('search_hoshaya_directory')) functionDeclarations.push(searchHoshayaDirectoryDeclaration);
+        if (calendarKeywords.test(userMessage) && isAllowed('list_calendar_events')) {
           functionDeclarations.push(
-            gmailListRecentDeclaration,
-            gmailReadEmailDeclaration,
-            gmailDraftReplyDeclaration,
-            gmailAddWatchLabelDeclaration,
-            gmailRemoveWatchLabelDeclaration,
-            gmailListWatchLabelsDeclaration,
+            listCalendarEventsDeclaration,
+            createCalendarEventDeclaration,
+            updateCalendarEventDeclaration,
+            deleteCalendarEventDeclaration
           );
         }
+        if (sendMessageKeywords.test(userMessage) && isAllowed('send_message')) functionDeclarations.push(sendMessageDeclaration);
+        if (choreKeywords.test(userMessage) && isAllowed('manage_chore_rotation')) functionDeclarations.push(manageChoreRotationDeclaration);
       }
 
       const isFunctionCallRequest = functionDeclarations.length > 0;
 
+      // Owner mode skips googleSearch entirely (SDK bug: googleSearch + functionDeclarations can't coexist).
+      // Default mode falls back to googleSearch when no functions match.
       const tools = isFunctionCallRequest
         ? [{ functionDeclarations }]
-        : [{ googleSearch: {} }];
+        : (mode === 'owner' ? [] : [{ googleSearch: {} }]);
 
       const chat = this.ai.chats.create({
         model: config.geminiModel,
@@ -584,10 +599,11 @@ Messages in [brackets] in conversation history are factual records of actions yo
     senderJid?: string
   ): Promise<string> {
     try {
+      const mode = this.getAssistantMode(jid, senderJid);
       const historyKey = `${tenantId}:${jid}`;
       const history = this.conversationHistory.get(historyKey) ?? this.loadHistoryFromDb(historyKey, jid, tenantId);
       const knowledgeRepo = getKnowledgeRepository();
-      const knowledgeContext = knowledgeRepo.getFormattedKnowledge(jid);
+      const knowledgeContext = mode === 'owner' ? '' : knowledgeRepo.getFormattedKnowledge(jid);
 
       // Load user memories for the sender
       const memoryRepo = getUserMemoryRepository();
@@ -597,7 +613,11 @@ Messages in [brackets] in conversation history are factual records of actions yo
       const convRepo = getConversationHistoryRepository();
       const summaries = convRepo.getFormattedSummaries(jid, tenantId);
 
-      const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + userMemories + summaries + this.getImageInstructions();
+      const imageInstructions = mode === 'owner' ? '' : this.getImageInstructions();
+      const baseIdentity = mode === 'owner'
+        ? `You are Itai's personal assistant. Hebrew by default. Concise, direct. NEVER auto-generate images.`
+        : (customPrompt || config.systemPrompt);
+      const systemPrompt = baseIdentity + knowledgeContext + userMemories + summaries + imageInstructions;
 
       const chat = this.ai.chats.create({
         model: config.geminiModel,
@@ -692,16 +712,21 @@ Messages in [brackets] in conversation history are factual records of actions yo
     tenantId: string = 'default'
   ): Promise<string> {
     try {
+      const mode = this.getAssistantMode(jid);
       const historyKey = `${tenantId}:${jid}`;
       const history = this.conversationHistory.get(historyKey) ?? this.loadHistoryFromDb(historyKey, jid, tenantId);
       const knowledgeRepo = getKnowledgeRepository();
-      const knowledgeContext = knowledgeRepo.getFormattedKnowledge(jid);
+      const knowledgeContext = mode === 'owner' ? '' : knowledgeRepo.getFormattedKnowledge(jid);
 
       // Get conversation summaries from compaction
       const convRepo = getConversationHistoryRepository();
       const summaries = convRepo.getFormattedSummaries(jid, tenantId);
 
-      const systemPrompt = (customPrompt || config.systemPrompt) + knowledgeContext + summaries + this.getImageInstructions();
+      const imageInstructions = mode === 'owner' ? '' : this.getImageInstructions();
+      const baseIdentity = mode === 'owner'
+        ? `You are Itai's personal assistant. Hebrew by default. Concise, direct. NEVER auto-generate images.`
+        : (customPrompt || config.systemPrompt);
+      const systemPrompt = baseIdentity + knowledgeContext + summaries + imageInstructions;
 
       const chat = this.ai.chats.create({
         model: config.geminiModel,
