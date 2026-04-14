@@ -26,6 +26,12 @@ export declare class MessageHandler {
     private runAIWithDispatch;
     private extractText;
     private handleAudioMessage;
+    /**
+     * Extract meaningful content from a swipe-to-reply quoted message.
+     * Audio is transcribed on the fly; text/caption/image-caption are returned as-is.
+     * Returns null if there's no quote or no extractable content.
+     */
+    private extractQuotedContent;
     private handleTranscribeCommand;
     private handleImageMessage;
     private handleDocumentMessage;

@@ -1,4 +1,4 @@
-export type OwnerIntent = 'email_new' | 'calendar_list' | 'calendar_create' | 'general';
+export type OwnerIntent = 'email_new' | 'calendar_list' | 'calendar_create' | 'task_add' | 'general';
 export interface ClassifiedIntent {
     intent: OwnerIntent;
     slots: {

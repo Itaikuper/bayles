@@ -6,6 +6,7 @@ export type OwnerIntent =
   | 'email_new'
   | 'calendar_list'
   | 'calendar_create'
+  | 'task_add'
   | 'general';
 
 export interface ClassifiedIntent {
@@ -31,12 +32,13 @@ const intentSchema = {
   properties: {
     intent: {
       type: Type.STRING,
-      enum: ['email_new', 'calendar_list', 'calendar_create', 'general'] as string[],
+      enum: ['email_new', 'calendar_list', 'calendar_create', 'task_add', 'general'] as string[],
       description:
         'email_new = compose a brand-new EMAIL draft (not a reply). Requires EXPLICIT email marker. ' +
         'calendar_list = ask about schedule / events / agenda for a date or range. ' +
         'calendar_create = create a calendar event. ' +
-        'general = anything else (translations, text composition without explicit email marker, email replies, tasks, memory queries, casual chat, corrections, multi-step asks).',
+        'task_add = add a todo / task, including "turn this into a task" on a forwarded or quoted message. ' +
+        'general = anything else (translations, text composition without explicit email marker, email replies, memory queries, casual chat, corrections, multi-step asks).',
     },
     recipient_hint: { type: Type.STRING, description: 'email_new only: WHO to email. Empty string if not mentioned.' },
     subject_hint: { type: Type.STRING, description: 'email_new only: stated subject. Empty string if not mentioned.' },
@@ -83,7 +85,9 @@ Classify the user's message into exactly one of:
 
 - calendar_create — CREATE a calendar event. Examples: "תקבע פגישה היום ב-21:30", "תוסיף ליומן רופא שיניים מחר ב-10", "schedule a meeting".
 
-- general — EVERYTHING ELSE. This includes: translations, text composition without explicit email marker, email replies, tasks, memory queries, casual chat, corrections to prior requests, ambiguous/multi-step asks.
+- task_add — ADD a TODO / task. Triggered by explicit task keywords: Hebrew "משימה", "זאת משימה", "משימה לביצוע", "תוסיף למשימות", "הפוך למשימה", "תהפוך למשימה", "שמע את ההודעה והפוך למשימה", "תזכיר לי", "אני צריך"; English "task", "todo", "add as task", "remind me", "I need to". Includes "turn this into a task" where "this" refers to a forwarded message, a quoted (swipe-reply) message, or the previous conversation turn. Produce this classification even when task content is not in the current message — the agent will pull context from <QUOTED> block or history.
+
+- general — EVERYTHING ELSE. This includes: translations, text composition without explicit email marker, email replies, memory queries, casual chat, corrections to prior requests, ambiguous/multi-step asks.
 
 Slot rules (all optional — leave out or return empty string if not mentioned; do NOT fabricate placeholder values like "הודעה מנומסת"):
 

@@ -218,14 +218,16 @@ export class MessageHandler {
             .filter(([, v]) => v)
             .map(([k, v]) => `${k}="${v}"`)
             .join(', ');
-          intentHint = `Intent classifier suggests this message resembles "${classified.intent}"${slotSummary ? ` with slots: ${slotSummary}` : ''}. This is ADVISORY — verify against full conversation context before calling any tool. If the user is asking for translation/rephrasing/composition without an explicit email marker ("מייל"/"email"/"@"), respond with text, do NOT call draft_new_email.`;
+          const taskHint = classified.intent === 'task_add'
+            ? ' For task_add: if the current message has no task content, look for <QUOTED>...</QUOTED> in this message OR the most recent prior turn in history (especially if tagged [voice] or [הודעה שהועברה / forwarded]) — use that as the task source. Call add_task.'
+            : '';
+          intentHint = `Intent classifier suggests this message resembles "${classified.intent}"${slotSummary ? ` with slots: ${slotSummary}` : ''}. This is ADVISORY — verify against full conversation context before calling any tool. If the user is asking for translation/rephrasing/composition without an explicit email marker ("מייל"/"email"/"@"), respond with text, do NOT call draft_new_email.${taskHint}`;
         }
       }
 
       // Forward detection: WhatsApp marks forwarded messages in contextInfo.
       // When the owner forwards something (text, voice transcription, image caption, etc.),
-      // prepend a marker so the model knows this content originated elsewhere — enables
-      // the "turn forwarded message into task" flow without a separate command.
+      // prepend a marker so the model knows this content originated elsewhere.
       const fwdCtx =
         message.message?.extendedTextMessage?.contextInfo
         || message.message?.audioMessage?.contextInfo
@@ -238,9 +240,21 @@ export class MessageHandler {
       );
       const forwardMarker = isForwarded ? '[הודעה שהועברה / forwarded]\n' : '';
 
+      // Quote-reply detection: if the user swiped-to-reply to a prior message
+      // (voice/text/image), extract the referenced content and include it as
+      // <QUOTED> so the model sees both the reply and the source together.
+      // This enables flows like "quote-reply to a voice with 'הפוך למשימה'".
+      const quoted = await this.extractQuotedContent(message);
+      if (quoted) {
+        logger.info(`[quoted] type=${quoted.kind} len=${quoted.content.length}`);
+      }
+      const quotedBlock = quoted
+        ? `<QUOTED type="${quoted.kind}">\n${quoted.content}\n</QUOTED>\n\n`
+        : '';
+
       const messageForAI = isGroup && message.pushName
-        ? `${forwardMarker}[${message.pushName}]: ${cleanText}`
-        : `${forwardMarker}${cleanText}`;
+        ? `${forwardMarker}${quotedBlock}[${message.pushName}]: ${cleanText}`
+        : `${forwardMarker}${quotedBlock}${cleanText}`;
 
       const response = await this.gemini.generateResponse(
         jid,
@@ -397,6 +411,8 @@ export class MessageHandler {
 
       // Owner mode: transcribe first, then route through the text pipeline so
       // we get full tool access (gmail drafts, calendar, tasks, memory).
+      // Tag the transcription with [voice] so subsequent turns in history can
+      // distinguish audio-originated content from typed text.
       if (this.gemini.isOwnerMode(jid, sender || undefined)) {
         const transcription = await this.gemini.transcribeAudio(audioBuffer, mimeType);
         logger.info(`Owner voice transcription: ${transcription}`);
@@ -404,7 +420,8 @@ export class MessageHandler {
           await this.whatsapp.sendReply(jid, 'לא הצלחתי לשמוע אותך, נסה שוב.', message);
           return;
         }
-        await this.runAIWithDispatch(jid, transcription, isGroup, sender, message, decision.customPrompt);
+        const taggedText = `[voice] ${transcription.trim()}`;
+        await this.runAIWithDispatch(jid, taggedText, isGroup, sender, message, decision.customPrompt);
         return;
       }
 
@@ -447,6 +464,45 @@ export class MessageHandler {
         message
       );
     }
+  }
+
+  /**
+   * Extract meaningful content from a swipe-to-reply quoted message.
+   * Audio is transcribed on the fly; text/caption/image-caption are returned as-is.
+   * Returns null if there's no quote or no extractable content.
+   */
+  private async extractQuotedContent(
+    message: proto.IWebMessageInfo,
+  ): Promise<{ kind: 'voice' | 'text' | 'image'; content: string } | null> {
+    const qm =
+      message.message?.extendedTextMessage?.contextInfo?.quotedMessage
+      || message.message?.audioMessage?.contextInfo?.quotedMessage
+      || message.message?.imageMessage?.contextInfo?.quotedMessage
+      || message.message?.videoMessage?.contextInfo?.quotedMessage
+      || message.message?.documentMessage?.contextInfo?.quotedMessage;
+    if (!qm) return null;
+
+    if (qm.audioMessage) {
+      try {
+        const buf = await this.whatsapp.downloadAudio(qm.audioMessage);
+        const mime = qm.audioMessage.mimetype || 'audio/ogg; codecs=opus';
+        const text = await this.gemini.transcribeAudio(buf, mime);
+        const trimmed = text?.trim() || '';
+        if (!trimmed || /^לא זוהה דיבור\.?$/.test(trimmed)) return null;
+        return { kind: 'voice', content: trimmed };
+      } catch (err) {
+        logger.warn('[quoted] audio transcription failed:', err);
+        return null;
+      }
+    }
+
+    const t = qm.extendedTextMessage?.text || qm.conversation || null;
+    if (t?.trim()) return { kind: 'text', content: t.trim() };
+
+    const c = qm.imageMessage?.caption?.trim();
+    if (c) return { kind: 'image', content: c };
+
+    return null;
   }
 
   private async handleTranscribeCommand(
