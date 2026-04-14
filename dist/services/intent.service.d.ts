@@ -17,6 +17,12 @@ export interface ClassifiedIntent {
 export declare class IntentService {
     private ai;
     constructor();
-    classify(userMessage: string): Promise<ClassifiedIntent>;
+    /**
+     * Classify an owner-mode message into a coarse intent bucket.
+     *
+     * Output is ADVISORY — the caller passes it as a hint to the main agent,
+     * which may ignore it. Never rely on this to dispatch workflows directly.
+     */
+    classify(userMessage: string, recentHistory?: string): Promise<ClassifiedIntent>;
 }
 export declare function getIntentService(): IntentService;

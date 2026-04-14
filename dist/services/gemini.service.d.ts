@@ -11,7 +11,13 @@ export declare class GeminiService {
      */
     isOwnerMode(jid: string, senderJid?: string): boolean;
     private getAssistantMode;
-    generateResponse(jid: string, userMessage: string, customPrompt?: string, tenantId?: string, senderJid?: string): Promise<GeminiResponse>;
+    /**
+     * Format the last N turns of conversation as a plain-text transcript for the intent classifier.
+     * Reads from in-memory map (falling back to DB load). Strips tool-call action markers since
+     * the classifier only cares about user/model natural-language exchanges.
+     */
+    formatRecentForClassifier(jid: string, tenantId?: string, turns?: number): string;
+    generateResponse(jid: string, userMessage: string, customPrompt?: string, tenantId?: string, senderJid?: string, intentHint?: string): Promise<GeminiResponse>;
     generateAudioResponse(jid: string, audioBuffer: Buffer, mimeType: string, customPrompt?: string, contextPrefix?: string, tenantId?: string, senderJid?: string): Promise<string>;
     transcribeAudio(audioBuffer: Buffer, mimeType: string): Promise<string>;
     generateDocumentAnalysisResponse(jid: string, mediaBuffer: Buffer, mimeType: string, caption?: string, customPrompt?: string, contextPrefix?: string, fileName?: string, tenantId?: string): Promise<string>;

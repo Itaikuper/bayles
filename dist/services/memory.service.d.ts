@@ -1,9 +1,10 @@
 /**
- * Markdown-on-disk memory store inspired by OpenClaw.
+ * Markdown-on-disk memory store inspired by OpenClaw + Hermes.
  *
  * Layout:
  *   data/memory/owner/
- *     ├─ core.md          ~100 lines, ALWAYS injected into system prompt
+ *     ├─ soul.md          personality/identity + execute-first directive (ALWAYS injected)
+ *     ├─ core.md          ~100 lines of facts, ALWAYS injected into system prompt
  *     ├─ daily/YYYY-MM-DD.md  auto-appended notes per day; today + yesterday loaded
  *     ├─ people/<slug>.md  on-demand via search_memory
  *     └─ projects/<slug>.md  on-demand via search_memory
@@ -12,6 +13,7 @@ export declare class MemoryService {
     private readonly root;
     constructor(rootDir?: string);
     ensureLayout(): Promise<void>;
+    readSoul(): Promise<string>;
     readCore(): Promise<string>;
     writeCore(content: string): Promise<void>;
     /** Apply a section patch: replace or append section under "## <heading>". */

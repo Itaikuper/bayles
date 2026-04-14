@@ -205,37 +205,20 @@ export class MessageHandler {
     customPrompt?: string
   ): Promise<void> {
     try {
-      // Owner-mode workflow routing: deterministic scripts for well-defined verbs.
-      // Falls through to the existing agent-style dispatch for anything else.
+      // Owner-mode: run the intent classifier ONLY as an advisory hint.
+      // Hermes/OpenClaw pattern: the model drives — we don't short-circuit to workflows.
+      // The model receives the hint in its system prompt and decides whether to call a tool.
+      let intentHint: string | undefined;
       if (this.gemini.isOwnerMode(jid, sender || undefined)) {
-        const classified = await getIntentService().classify(cleanText);
-        logger.info(`[intent] ${classified.intent} — ${classified.reasoning || ''} slots=${JSON.stringify(classified.slots)}`);
-
-        if (classified.intent === 'email_new' && this.gmailService) {
-          const handled = await runEmailNewWorkflow(jid, classified.slots, message, {
-            gemini: this.gemini,
-            gmail: this.gmailService,
-            whatsapp: this.whatsapp,
-          });
-          if (handled) return;
-        }
-
-        if (classified.intent === 'calendar_list' && this.calendarService) {
-          const handled = await runCalendarListWorkflow(jid, classified.slots, message, {
-            gemini: this.gemini,
-            calendar: this.calendarService,
-            whatsapp: this.whatsapp,
-          });
-          if (handled) return;
-        }
-
-        if (classified.intent === 'calendar_create' && this.calendarService) {
-          const handled = await runCalendarCreateWorkflow(jid, classified.slots, message, {
-            gemini: this.gemini,
-            calendar: this.calendarService,
-            whatsapp: this.whatsapp,
-          });
-          if (handled) return;
+        const recent = this.gemini.formatRecentForClassifier(jid, 'default', 6);
+        const classified = await getIntentService().classify(cleanText, recent);
+        logger.info(`[intent-hint] ${classified.intent} — ${classified.reasoning || ''} slots=${JSON.stringify(classified.slots)}`);
+        if (classified.intent !== 'general') {
+          const slotSummary = Object.entries(classified.slots)
+            .filter(([, v]) => v)
+            .map(([k, v]) => `${k}="${v}"`)
+            .join(', ');
+          intentHint = `Intent classifier suggests this message resembles "${classified.intent}"${slotSummary ? ` with slots: ${slotSummary}` : ''}. This is ADVISORY — verify against full conversation context before calling any tool. If the user is asking for translation/rephrasing/composition without an explicit email marker ("מייל"/"email"/"@"), respond with text, do NOT call draft_new_email.`;
         }
       }
 
@@ -248,13 +231,41 @@ export class MessageHandler {
         messageForAI,
         customPrompt,
         'default',
-        sender || undefined
+        sender || undefined,
+        intentHint
       );
 
       if (response.type === 'function_call' && response.functionCall) {
         let actionSummary: string | null = null;
 
-        if (response.functionCall.name === 'create_schedule') {
+        if (response.functionCall.name === 'draft_new_email' && this.gmailService) {
+          const args = response.functionCall.args as { recipient_hint: string; topic: string; subject_hint?: string };
+          await runEmailNewWorkflow(
+            jid,
+            { recipient_hint: args.recipient_hint, topic_hint: args.topic, subject_hint: args.subject_hint },
+            message,
+            { gemini: this.gemini, gmail: this.gmailService, whatsapp: this.whatsapp },
+          );
+          actionSummary = `[triggered draft_new_email for "${args.recipient_hint}"]`;
+        } else if (response.functionCall.name === 'list_calendar_smart' && this.calendarService) {
+          const args = response.functionCall.args as { date_phrase: string; calendar_hint?: string; query_hint?: string };
+          await runCalendarListWorkflow(
+            jid,
+            args,
+            message,
+            { gemini: this.gemini, calendar: this.calendarService, whatsapp: this.whatsapp },
+          );
+          actionSummary = `[triggered list_calendar_smart for "${args.date_phrase}"]`;
+        } else if (response.functionCall.name === 'create_calendar_smart' && this.calendarService) {
+          const args = response.functionCall.args as { summary_hint: string; date_phrase?: string; time_phrase?: string; duration_phrase?: string; calendar_hint?: string };
+          await runCalendarCreateWorkflow(
+            jid,
+            args,
+            message,
+            { gemini: this.gemini, calendar: this.calendarService, whatsapp: this.whatsapp },
+          );
+          actionSummary = `[triggered create_calendar_smart: "${args.summary_hint}"]`;
+        } else if (response.functionCall.name === 'create_schedule') {
           const scheduleArgs = response.functionCall.args as unknown as ScheduleArgs;
           actionSummary = await this.handleScheduleFunctionCall(jid, scheduleArgs, message);
         } else if (response.functionCall.name === 'search_song') {

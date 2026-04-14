@@ -44,26 +44,29 @@ Single-owner OAuth2. Restricted to `GMAIL_OWNER_JID`. Scopes: `gmail.readonly` +
 
 Triggered automatically when the message JID equals `GMAIL_OWNER_JID`. Implemented in `src/services/gemini.service.ts` via `getAssistantMode()`. In owner mode:
 
-- Focused identity prompt — Hebrew, terse, no filler, no auto-images, eager tool calling
-- All personal-assistant tools always available (no keyword regex gates): calendar (CRUD), gmail (read+drafts), tasks, memory, schedule
+- Identity loaded from `data/memory/owner/soul.md` — personality, execute-first principle, email-drafting rules (OpenClaw SOUL pattern)
+- All personal-assistant tools always available (no keyword regex gates): calendar (CRUD + smart), gmail (read+drafts), tasks, memory, schedule
+- Intent classifier (`intent.service.ts`) runs but output is ADVISORY — passed as a `<HINT>` section in the system prompt. The main Gemini agent decides whether to call a tool (Hermes model-driven pattern). Workflows are exposed as function-call tools (`draft_new_email`, `list_calendar_smart`, `create_calendar_smart`).
 - `googleSearch` disabled (SDK can't combine with `functionDeclarations`); accepted trade-off
 - Knowledge-base injection disabled (replaced by markdown memory)
 
-**Memory layout** (markdown on disk, NOT committed; lives at `data/memory/owner/` on the server):
+**Memory layout** (markdown on disk, NOT committed; lives at `data/memory/owner/` on the server). Two-tier like Hermes/OpenClaw — always-loaded identity+facts + on-demand topic files:
 
 ```
 data/memory/owner/
-├── core.md           # ALWAYS injected into system prompt (~100 lines, curated)
+├── soul.md           # ALWAYS injected: personality, execute-first principle, email-drafting rules (OpenClaw SOUL pattern)
+├── core.md           # ALWAYS injected: user facts, preferences, active projects, email signature (~100 lines)
 ├── daily/YYYY-MM-DD.md  # auto-appended notes; today + yesterday loaded
 ├── people/<slug>.md  # on-demand via search_memory tool
 └── projects/<slug>.md  # on-demand via search_memory tool
 ```
 
-`MemoryService` (`src/services/memory.service.ts`) handles atomic reads/writes. The owner can edit `core.md` directly with VSCode over `gcloud compute scp`, or via the bot's `update_core_memory` tool.
+Both `soul.md` and `core.md` auto-seed on first startup from defaults in `memory.service.ts` if missing. `MemoryService` handles atomic reads/writes. The owner can edit either file directly via `gcloud compute scp`, or modify `core.md` via the bot's `update_core_memory` tool.
 
 **Owner-only tools** (defined in `gemini.service.ts`, dispatched in `message.handler.ts`):
-- Calendar: `list/create/update/delete_calendar_events`
-- Gmail: `gmail_list_recent_emails`, `gmail_read_email`, `gmail_draft_reply`, `gmail_add/remove/list_watch_label`, `gmail_add/remove/list_watch_sender`
+- **Smart workflows** (Hebrew-aware, model-invoked): `draft_new_email`, `list_calendar_smart`, `create_calendar_smart`
+- Calendar (raw): `list/create/update/delete_calendar_events`
+- Gmail: `gmail_list_recent_emails`, `gmail_read_email`, `gmail_draft_reply`, `gmail_draft_new`, `gmail_add/remove/list_watch_label`, `gmail_add/remove/list_watch_sender`
 - Tasks: `add_task`, `list_tasks`, `complete_task`, `snooze_task` (table `tasks`, migration 015)
 - Memory: `search_memory`, `update_core_memory`, `append_person_note`, `append_project_note`
 - Reminders: `create_schedule`

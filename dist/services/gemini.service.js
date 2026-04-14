@@ -417,7 +417,7 @@ const gmailDisablePersonalInboxDeclaration = {
 // --- Memory (owner mode) ---
 const searchMemoryDeclaration = {
     name: 'search_memory',
-    description: 'Search the persistent memory (people and project notes) for what we know about someone or something. Use whenever the owner mentions a name or project you might have notes on.',
+    description: 'Search the persistent memory (people and project notes) for what we know about someone or something. Use ONLY when the task fundamentally depends on knowing facts about a person or project — scheduling with them, composing personalized emails, answering "who is X", recalling their preferences. Do NOT call for self-contained tasks like translation, rephrasing, grammar-fixing, or summarization — names in those are content, not subject.',
     parameters: {
         type: Type.OBJECT,
         properties: {
@@ -511,6 +511,50 @@ const snoozeTaskDeclaration = {
         required: ['until_iso'],
     },
 };
+// --- Workflow-as-tool declarations (owner mode) ---
+// These wrap the deterministic workflow functions (recipient resolution, Hebrew date parsing,
+// multi-calendar routing). The model decides when to call them — no pre-classifier hijack.
+const draftNewEmailDeclaration = {
+    name: 'draft_new_email',
+    description: 'Draft a brand-new Gmail email (NOT a reply). Use ONLY when the user EXPLICITLY asks for email/mail/draft/gmail. Required markers: Hebrew "מייל"/"אימייל"/"דראפט"/"דוא״ל", English "email"/"mail"/"draft"/"gmail", OR an @-address in the request. Do NOT call for plain text composition, translation, WhatsApp/SMS drafting, or rephrasing — those are text responses, not email drafts. Verbs alone ("שלח", "כתוב", "תכין", "תנסח") are NOT sufficient without an email marker. This tool does recipient resolution, prior-thread lookup, body generation, and draft creation.',
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            recipient_hint: { type: Type.STRING, description: 'Who to email — name or email address, as stated by the user.' },
+            topic: { type: Type.STRING, description: 'What the email should be about — the actual content direction, not a meta-description. Copy the user\'s own words when possible.' },
+            subject_hint: { type: Type.STRING, description: 'Optional subject line if the user specified one.' },
+        },
+        required: ['recipient_hint', 'topic'],
+    },
+};
+const listCalendarSmartDeclaration = {
+    name: 'list_calendar_smart',
+    description: 'List calendar events with Hebrew date-phrase understanding ("היום", "מחר", "השבוע", "ב-15 לחודש") and multi-calendar routing (queries all calendars linked to the user unless a specific calendar is named). Prefer this over list_calendar_events when the user uses natural-language date phrases.',
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            date_phrase: { type: Type.STRING, description: 'Raw date phrase from the user: "היום", "מחר", "השבוע", "ב-15", "next Monday".' },
+            calendar_hint: { type: Type.STRING, description: 'Optional: which calendar ("של אסתר", "המשותף"). Empty if unspecified.' },
+            query_hint: { type: Type.STRING, description: 'Optional free-text filter ("פגישות עם דנה").' },
+        },
+        required: ['date_phrase'],
+    },
+};
+const createCalendarSmartDeclaration = {
+    name: 'create_calendar_smart',
+    description: 'Create a calendar event with Hebrew date+time phrase parsing and default-calendar routing. Prefer this over create_calendar_event when the user uses natural-language phrases ("מחר ב-10", "יום שישי 21:30").',
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            summary_hint: { type: Type.STRING, description: 'Event title ("פגישה עם דנה", "רופא שיניים").' },
+            date_phrase: { type: Type.STRING, description: 'Raw date phrase: "היום", "מחר", "ב-15", "next Friday".' },
+            time_phrase: { type: Type.STRING, description: 'Raw time phrase: "ב21:30", "10 בבוקר", "מ-3 עד 5".' },
+            duration_phrase: { type: Type.STRING, description: 'Optional duration: "שעה", "30 דקות".' },
+            calendar_hint: { type: Type.STRING, description: 'Optional calendar target.' },
+        },
+        required: ['summary_hint'],
+    },
+};
 export class GeminiService {
     ai;
     conversationHistory = new Map();
@@ -562,7 +606,30 @@ export class GeminiService {
             return 'owner';
         return 'default';
     }
-    async generateResponse(jid, userMessage, customPrompt, tenantId = 'default', senderJid) {
+    /**
+     * Format the last N turns of conversation as a plain-text transcript for the intent classifier.
+     * Reads from in-memory map (falling back to DB load). Strips tool-call action markers since
+     * the classifier only cares about user/model natural-language exchanges.
+     */
+    formatRecentForClassifier(jid, tenantId = 'default', turns = 6) {
+        const key = `${tenantId}:${jid}`;
+        const history = this.conversationHistory.get(key) ?? this.loadHistoryFromDb(key, jid, tenantId);
+        if (!history.length)
+            return '';
+        // Each message pair = user + model. Take last `turns` messages (= turns/2 pairs).
+        const slice = history.slice(-turns * 2);
+        return slice
+            .map(m => {
+            const text = m.parts?.map(p => p.text || '').join('').trim();
+            if (!text)
+                return '';
+            const role = m.role === 'user' ? 'User' : 'Assistant';
+            return `${role}: ${text.length > 400 ? text.slice(0, 400) + '…' : text}`;
+        })
+            .filter(Boolean)
+            .join('\n');
+    }
+    async generateResponse(jid, userMessage, customPrompt, tenantId = 'default', senderJid, intentHint) {
         try {
             const mode = this.getAssistantMode(jid, senderJid);
             // Get or initialize conversation history (scoped by tenant)
@@ -585,48 +652,29 @@ export class GeminiService {
             const privacyGuardrail = !injectMemory
                 ? '\n\nCRITICAL PRIVACY RULE: You must NEVER reveal, share, or reference any personal information about any user — not from memory, not from conversation history, not from summaries. If asked "what do you know about me" or similar, respond that you don\'t store personal information in this chat. This rule overrides all other instructions.'
                 : '';
-            // Owner mode: focused personal-assistant prompt, no image instructions, no knowledge-base noise.
+            // Owner mode: soul + core memory + recent daily notes — Hermes/OpenClaw style.
             // Default mode: existing behavior (custom prompt + knowledge + image instructions).
             const imageInstructions = mode === 'owner' ? '' : this.getImageInstructions();
+            let ownerIdentity = '';
             let ownerMemorySection = '';
             if (mode === 'owner') {
                 try {
                     const memSvc = getMemoryService();
-                    const core = await memSvc.readCore();
-                    const daily = await memSvc.readRecentDaily(2);
+                    const [soul, core, daily] = await Promise.all([
+                        memSvc.readSoul(),
+                        memSvc.readCore(),
+                        memSvc.readRecentDaily(2),
+                    ]);
+                    ownerIdentity = soul.trim();
                     ownerMemorySection = `\n\n<CORE_MEMORY>\n${core.trim()}\n</CORE_MEMORY>\n\n<RECENT_DAYS>\n${daily || '(no recent notes)'}\n</RECENT_DAYS>`;
                 }
                 catch (err) {
                     logger.warn('MemoryService failed to load owner memory:', err);
                 }
             }
+            const hintSection = intentHint ? `\n\n<HINT>\n${intentHint}\n</HINT>` : '';
             const baseIdentity = mode === 'owner'
-                ? `You are Itai's executive assistant. You operate like a real EA at a senior manager — Itai gives short task instructions, you execute them with care, fluently and professionally. Default language: Hebrew. Replies to Itai are concise (≤150 words) and in his language. NEVER generate images unless he explicitly invokes /image or /proimage.
-
-When asked anything that maps to a tool (mail, calendar, tasks, memory), CALL THE TOOL — never guess, never say "I don't have access".
-
-EMAIL DRAFTING RULES (critical — you draft, never send):
-
-1. CREATE the content; do NOT transcribe the instruction. When Itai describes WHAT the email should contain ("write a poem", "summarize Q3 results", "thank them for the proposal", "invite him to dinner"), you must actually PRODUCE that content — write the poem, write the summary, write the invitation. Do not put Itai's meta-instruction into the body. Example of the bug to avoid:
-   - Instruction: "בגוף כתוב שיר יפה ומרגש" (body should have a beautiful emotional poem)
-   - WRONG body: "שיר יפה ומרגש"  ← literally quoting the instruction
-   - RIGHT body: an actual 4–8 line poem that fits the subject/recipient.
-
-2. Before drafting ANY email to a named recipient (new or reply), first call gmail_list_recent_emails with q="from:<email> OR to:<email>" (max=5) to inspect recent thread context. If there is a relevant prior thread that looks like the same topic, prefer gmail_draft_reply to that message instead of gmail_draft_new.
-
-3. Register: match the relationship. Business contact → polite, direct, professional, no emojis. Family/personal (e.g., wife, close friend) → warm, personal, natural tone, emojis OK if the thread uses them.
-
-4. Language: match the recipient's last correspondence. If none, use Itai's instruction language for personal/family recipients; default to professional English for business contacts unless Itai specified otherwise. For Hebrew recipients write Hebrew.
-
-5. Structure — ALWAYS include all four parts, even for short/creative emails:
-   a. Subject: specific and meaningful (not "Update", not a transcription of the instruction).
-   b. Greeting by first name: "Dear <FirstName>," / "היי <שם>," / "אסתר שלי," for intimate cases.
-   c. Body: the actual content you've generated (paragraphs separated by blank lines).
-   d. Closing + signature: a closing line when appropriate, then blank line, then the signature from core memory ("## Email signature" section). NEVER skip the signature.
-
-6. After creating the draft, the WhatsApp confirmation (with the link) is sent automatically — do NOT also send a text summary yourself.
-
-When Itai reveals a durable preference, identity detail, or active project, call update_core_memory. After meetings or when context is shared about a person/project, call append_person_note / append_project_note.${ownerMemorySection}`
+                ? `${ownerIdentity}${ownerMemorySection}${hintSection}`
                 : (customPrompt || config.systemPrompt);
             const systemPrompt = baseIdentity + knowledgeContext + userMemories + summaries + imageInstructions + privacyGuardrail;
             // Get today's date for scheduling context
@@ -650,7 +698,15 @@ Messages in [brackets] in conversation history are factual records of actions yo
             if (mode === 'owner') {
                 // Owner mode: always include the full personal-assistant tool set. No keyword regex gates.
                 // Let Gemini decide when to call each tool based on the message + system prompt.
-                functionDeclarations.push(listCalendarEventsDeclaration, createCalendarEventDeclaration, updateCalendarEventDeclaration, deleteCalendarEventDeclaration, gmailListRecentDeclaration, gmailReadEmailDeclaration, gmailDraftReplyDeclaration, gmailDraftNewDeclaration, gmailAddWatchLabelDeclaration, gmailRemoveWatchLabelDeclaration, gmailListWatchLabelsDeclaration, gmailAddWatchSenderDeclaration, gmailRemoveWatchSenderDeclaration, gmailListWatchSendersDeclaration, gmailBlockSenderDeclaration, gmailUnblockSenderDeclaration, gmailListBlockedDeclaration, gmailEnablePersonalInboxDeclaration, gmailDisablePersonalInboxDeclaration, createScheduleDeclaration, searchMemoryDeclaration, updateCoreMemoryDeclaration, appendPersonNoteDeclaration, appendProjectNoteDeclaration, addTaskDeclaration, listTasksDeclaration, completeTaskDeclaration, snoozeTaskDeclaration);
+                // Workflow-as-tools (draft_new_email, list_calendar_smart, create_calendar_smart) wrap
+                // the deterministic workflows — model invokes them when it judges appropriate.
+                functionDeclarations.push(
+                // Workflow tools (smart variants with Hebrew parsing + memory lookups)
+                draftNewEmailDeclaration, listCalendarSmartDeclaration, createCalendarSmartDeclaration, 
+                // Raw calendar tools (for explicit ISO dates / simple cases)
+                listCalendarEventsDeclaration, createCalendarEventDeclaration, updateCalendarEventDeclaration, deleteCalendarEventDeclaration, 
+                // Gmail
+                gmailListRecentDeclaration, gmailReadEmailDeclaration, gmailDraftReplyDeclaration, gmailDraftNewDeclaration, gmailAddWatchLabelDeclaration, gmailRemoveWatchLabelDeclaration, gmailListWatchLabelsDeclaration, gmailAddWatchSenderDeclaration, gmailRemoveWatchSenderDeclaration, gmailListWatchSendersDeclaration, gmailBlockSenderDeclaration, gmailUnblockSenderDeclaration, gmailListBlockedDeclaration, gmailEnablePersonalInboxDeclaration, gmailDisablePersonalInboxDeclaration, createScheduleDeclaration, searchMemoryDeclaration, updateCoreMemoryDeclaration, appendPersonNoteDeclaration, appendProjectNoteDeclaration, addTaskDeclaration, listTasksDeclaration, completeTaskDeclaration, snoozeTaskDeclaration);
             }
             else {
                 // Default mode: existing keyword-gated tool selection.
