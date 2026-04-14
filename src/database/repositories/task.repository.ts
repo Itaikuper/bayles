@@ -5,12 +5,20 @@ export interface TaskRecord {
   jid: string;
   title: string;
   notes: string | null;
+  category: string | null;
   status: 'pending' | 'done' | 'snoozed';
   due_at: number | null;
   snooze_until: number | null;
   created_at: number;
   updated_at: number;
   completed_at: number | null;
+}
+
+export interface TaskEditPatch {
+  title?: string;
+  notes?: string | null;
+  category?: string | null;
+  dueAt?: number | null;
 }
 
 let instance: TaskRepository | null = null;
@@ -20,13 +28,13 @@ export function getTaskRepository(): TaskRepository {
 }
 
 export class TaskRepository {
-  add(jid: string, title: string, opts: { notes?: string; dueAt?: number } = {}): TaskRecord {
+  add(jid: string, title: string, opts: { notes?: string; dueAt?: number; category?: string } = {}): TaskRecord {
     const db = getDatabase();
     const now = Date.now();
     const res = db.prepare(`
-      INSERT INTO tasks (jid, title, notes, due_at, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(jid, title, opts.notes || null, opts.dueAt || null, now, now);
+      INSERT INTO tasks (jid, title, notes, category, due_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(jid, title, opts.notes || null, opts.category || null, opts.dueAt || null, now, now);
     return this.getById(Number(res.lastInsertRowid))!;
   }
 
@@ -35,24 +43,59 @@ export class TaskRepository {
     return db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as TaskRecord | undefined;
   }
 
-  list(jid: string, status?: 'pending' | 'done' | 'snoozed' | 'active'): TaskRecord[] {
+  /**
+   * List tasks for a JID, optionally filtered by status and/or category.
+   * Ordering: due date ascending (earliest first), NULL due dates last, then created_at ascending.
+   */
+  list(
+    jid: string,
+    status?: 'pending' | 'done' | 'snoozed' | 'active',
+    category?: string,
+  ): TaskRecord[] {
     const db = getDatabase();
+    const cat = category?.trim().toLowerCase() || undefined;
+    // Ordering: urgent items first (due soon), then undated by creation order.
+    const order = `ORDER BY
+      CASE WHEN due_at IS NULL THEN 1 ELSE 0 END,
+      due_at ASC,
+      created_at ASC`;
     if (status === 'active') {
-      // active = pending OR (snoozed AND snooze_until <= now)
-      return db.prepare(`
+      const rows = db.prepare(`
         SELECT * FROM tasks
         WHERE jid = ?
           AND (status = 'pending' OR (status = 'snoozed' AND snooze_until <= ?))
-        ORDER BY COALESCE(due_at, created_at) ASC
-      `).all(jid, Date.now()) as TaskRecord[];
+          ${cat ? 'AND LOWER(category) = ?' : ''}
+        ${order}
+      `).all(...(cat ? [jid, Date.now(), cat] : [jid, Date.now()])) as TaskRecord[];
+      return rows;
     }
     if (status) {
-      return db.prepare('SELECT * FROM tasks WHERE jid = ? AND status = ? ORDER BY created_at DESC').all(jid, status) as TaskRecord[];
+      return db.prepare(`
+        SELECT * FROM tasks WHERE jid = ? AND status = ?
+          ${cat ? 'AND LOWER(category) = ?' : ''}
+        ${order}
+      `).all(...(cat ? [jid, status, cat] : [jid, status])) as TaskRecord[];
     }
-    return db.prepare('SELECT * FROM tasks WHERE jid = ? ORDER BY created_at DESC').all(jid) as TaskRecord[];
+    return db.prepare(`
+      SELECT * FROM tasks WHERE jid = ?
+        ${cat ? 'AND LOWER(category) = ?' : ''}
+      ${order}
+    `).all(...(cat ? [jid, cat] : [jid])) as TaskRecord[];
   }
 
-  /** Find by partial title (case-insensitive). Used by complete/snooze when the model doesn't have an id. */
+  /** Distinct categories with active-task counts — useful for "what categories do I have?". */
+  listCategories(jid: string): { category: string; count: number }[] {
+    const db = getDatabase();
+    return db.prepare(`
+      SELECT COALESCE(category, 'general') AS category, COUNT(*) AS count
+      FROM tasks
+      WHERE jid = ? AND (status = 'pending' OR (status = 'snoozed' AND snooze_until <= ?))
+      GROUP BY COALESCE(category, 'general')
+      ORDER BY count DESC
+    `).all(jid, Date.now()) as { category: string; count: number }[];
+  }
+
+  /** Find by partial title (case-insensitive). Used by complete/snooze/edit when the model doesn't have an id. */
   findByTitle(jid: string, query: string): TaskRecord[] {
     const db = getDatabase();
     return db.prepare(`
@@ -60,6 +103,23 @@ export class TaskRepository {
       WHERE jid = ? AND status != 'done' AND LOWER(title) LIKE LOWER(?)
       ORDER BY created_at DESC LIMIT 5
     `).all(jid, `%${query}%`) as TaskRecord[];
+  }
+
+  /** Update selected fields. Only provided keys are changed. Returns the updated row. */
+  edit(id: number, patch: TaskEditPatch): TaskRecord | undefined {
+    const db = getDatabase();
+    const sets: string[] = [];
+    const values: (string | number | null)[] = [];
+    if (patch.title !== undefined) { sets.push('title = ?'); values.push(patch.title); }
+    if (patch.notes !== undefined) { sets.push('notes = ?'); values.push(patch.notes); }
+    if (patch.category !== undefined) { sets.push('category = ?'); values.push(patch.category); }
+    if (patch.dueAt !== undefined) { sets.push('due_at = ?'); values.push(patch.dueAt); }
+    if (sets.length === 0) return this.getById(id);
+    sets.push('updated_at = ?');
+    values.push(Date.now());
+    values.push(id);
+    db.prepare(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+    return this.getById(id);
   }
 
   complete(id: number): boolean {

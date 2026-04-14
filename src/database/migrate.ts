@@ -462,6 +462,20 @@ export function runMigrations(): void {
   runTasksMigration(db);
   runGmailSendersMigration(db);
   runGmailBlocklistMigration(db);
+  runTasksCategoryMigration(db);
+}
+
+function runTasksCategoryMigration(db: ReturnType<typeof getDatabase>): void {
+  const applied = db.prepare('SELECT name FROM migrations WHERE name = ?').get('018_tasks_category');
+  if (applied) return;
+  logger.info('Running migration: 018_tasks_category');
+  const cols = db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
+  if (!cols.some(c => c.name === 'category')) {
+    db.prepare(`ALTER TABLE tasks ADD COLUMN category TEXT`).run();
+  }
+  db.prepare('CREATE INDEX IF NOT EXISTS idx_tasks_jid_category_status ON tasks(jid, category, status)').run();
+  db.prepare('INSERT INTO migrations (name) VALUES (?)').run('018_tasks_category');
+  logger.info('Migration 018_tasks_category completed');
 }
 
 function runGmailBlocklistMigration(db: ReturnType<typeof getDatabase>): void {

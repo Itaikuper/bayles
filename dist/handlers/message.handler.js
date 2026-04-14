@@ -178,9 +178,21 @@ export class MessageHandler {
                     intentHint = `Intent classifier suggests this message resembles "${classified.intent}"${slotSummary ? ` with slots: ${slotSummary}` : ''}. This is ADVISORY — verify against full conversation context before calling any tool. If the user is asking for translation/rephrasing/composition without an explicit email marker ("מייל"/"email"/"@"), respond with text, do NOT call draft_new_email.`;
                 }
             }
+            // Forward detection: WhatsApp marks forwarded messages in contextInfo.
+            // When the owner forwards something (text, voice transcription, image caption, etc.),
+            // prepend a marker so the model knows this content originated elsewhere — enables
+            // the "turn forwarded message into task" flow without a separate command.
+            const fwdCtx = message.message?.extendedTextMessage?.contextInfo
+                || message.message?.audioMessage?.contextInfo
+                || message.message?.imageMessage?.contextInfo
+                || message.message?.videoMessage?.contextInfo
+                || message.message?.documentMessage?.contextInfo;
+            const isForwarded = Boolean(fwdCtx?.isForwarded
+                || (fwdCtx?.forwardingScore && fwdCtx.forwardingScore > 0));
+            const forwardMarker = isForwarded ? '[הודעה שהועברה / forwarded]\n' : '';
             const messageForAI = isGroup && message.pushName
-                ? `[${message.pushName}]: ${cleanText}`
-                : cleanText;
+                ? `${forwardMarker}[${message.pushName}]: ${cleanText}`
+                : `${forwardMarker}${cleanText}`;
             const response = await this.gemini.generateResponse(jid, messageForAI, customPrompt, 'default', sender || undefined, intentHint);
             if (response.type === 'function_call' && response.functionCall) {
                 let actionSummary = null;
@@ -240,7 +252,7 @@ export class MessageHandler {
                 else if (response.functionCall.name === 'search_memory' || response.functionCall.name === 'update_core_memory' || response.functionCall.name === 'append_person_note' || response.functionCall.name === 'append_project_note') {
                     actionSummary = await this.handleMemoryFunction(jid, response.functionCall.name, response.functionCall.args, message);
                 }
-                else if (response.functionCall.name === 'add_task' || response.functionCall.name === 'list_tasks' || response.functionCall.name === 'complete_task' || response.functionCall.name === 'snooze_task') {
+                else if (response.functionCall.name === 'add_task' || response.functionCall.name === 'list_tasks' || response.functionCall.name === 'edit_task' || response.functionCall.name === 'complete_task' || response.functionCall.name === 'snooze_task') {
                     actionSummary = await this.handleTaskFunction(jid, response.functionCall.name, response.functionCall.args, message);
                 }
                 else {
@@ -1536,26 +1548,90 @@ ${config.botPrefix} Tell me a joke
                     }
                     const dueIso = args.due_iso ? String(args.due_iso) : undefined;
                     const dueAt = dueIso ? Date.parse(dueIso) : undefined;
-                    const task = repo.add(jid, title, { notes: args.notes ? String(args.notes) : undefined, dueAt: dueAt && !isNaN(dueAt) ? dueAt : undefined });
-                    const dueStr = task.due_at ? ` (${new Date(task.due_at).toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' })})` : '';
-                    await this.whatsapp.sendReply(jid, `✅ הוספתי משימה #${task.id}: ${task.title}${dueStr}`, message);
-                    return `[add_task: #${task.id} ${title}]`;
+                    const category = args.category ? String(args.category).trim().toLowerCase() : undefined;
+                    const task = repo.add(jid, title, {
+                        notes: args.notes ? String(args.notes) : undefined,
+                        dueAt: dueAt && !isNaN(dueAt) ? dueAt : undefined,
+                        category,
+                    });
+                    const dueStr = task.due_at ? ` · ${new Date(task.due_at).toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' })}` : '';
+                    const catStr = task.category ? ` · [${task.category}]` : '';
+                    await this.whatsapp.sendReply(jid, `✅ הוספתי משימה #${task.id}: ${task.title}${catStr}${dueStr}`, message);
+                    return `[add_task: #${task.id} "${title}" cat=${task.category || 'general'}]`;
                 }
                 case 'list_tasks': {
                     const filter = args.filter || 'active';
                     const status = filter === 'all' ? undefined : filter;
-                    const tasks = repo.list(jid, status);
+                    const categoryFilter = args.category ? String(args.category).trim().toLowerCase() : undefined;
+                    const tasks = repo.list(jid, status, categoryFilter);
+                    const label = categoryFilter ? `${filter} · ${categoryFilter}` : filter;
                     if (tasks.length === 0) {
-                        await this.whatsapp.sendReply(jid, 'אין משימות פעילות. 🎉', message);
-                        return '[list_tasks: 0]';
+                        await this.whatsapp.sendReply(jid, categoryFilter ? `אין משימות ב-${categoryFilter}. 🎉` : 'אין משימות פעילות. 🎉', message);
+                        return `[list_tasks: 0 filter=${label}]`;
                     }
                     const text = tasks.slice(0, 20).map(t => {
                         const due = t.due_at ? ` · ${new Date(t.due_at).toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem', dateStyle: 'short', timeStyle: 'short' })}` : '';
+                        const cat = !categoryFilter && t.category ? ` · [${t.category}]` : '';
                         const mark = t.status === 'done' ? '✓' : t.status === 'snoozed' ? '💤' : '◻️';
-                        return `${mark} *#${t.id}* ${t.title}${due}`;
+                        return `${mark} *#${t.id}* ${t.title}${cat}${due}`;
                     }).join('\n');
-                    await this.whatsapp.sendReply(jid, `📋 משימות (${filter}):\n${text}`, message);
-                    return `[list_tasks: ${tasks.length}]`;
+                    await this.whatsapp.sendReply(jid, `📋 משימות (${label}):\n${text}`, message);
+                    return `[list_tasks: ${tasks.length} filter=${label}]`;
+                }
+                case 'edit_task': {
+                    let id = args.id ? Number(args.id) : undefined;
+                    if (!id && args.query) {
+                        const matches = repo.findByTitle(jid, String(args.query));
+                        if (matches.length === 0) {
+                            await this.whatsapp.sendReply(jid, `לא מצאתי משימה תואמת ל-"${args.query}".`, message);
+                            return '[edit_task: no match]';
+                        }
+                        if (matches.length > 1) {
+                            const list = matches.map(m => `#${m.id} ${m.title}`).join('\n');
+                            await this.whatsapp.sendReply(jid, `מספר התאמות:\n${list}\nציין id מדויק.`, message);
+                            return '[edit_task: ambiguous]';
+                        }
+                        id = matches[0].id;
+                    }
+                    if (!id) {
+                        await this.whatsapp.sendReply(jid, 'ציין id או query של המשימה.', message);
+                        return '[edit_task: no id]';
+                    }
+                    const existing = repo.getById(id);
+                    if (!existing || existing.jid !== jid) {
+                        await this.whatsapp.sendReply(jid, `לא מצאתי משימה #${id}.`, message);
+                        return `[edit_task: #${id} not found]`;
+                    }
+                    const patch = {};
+                    if (args.title !== undefined)
+                        patch.title = String(args.title).trim() || existing.title;
+                    if (args.category !== undefined) {
+                        const c = String(args.category).trim().toLowerCase();
+                        patch.category = c || null;
+                    }
+                    if (args.due_iso !== undefined) {
+                        const iso = String(args.due_iso).trim();
+                        if (!iso)
+                            patch.dueAt = null;
+                        else {
+                            const t = Date.parse(iso);
+                            if (!isNaN(t))
+                                patch.dueAt = t;
+                        }
+                    }
+                    if (args.notes !== undefined) {
+                        const n = String(args.notes);
+                        patch.notes = n.length === 0 ? null : n;
+                    }
+                    const updated = repo.edit(id, patch);
+                    if (!updated) {
+                        await this.whatsapp.sendReply(jid, `כשל בעדכון #${id}.`, message);
+                        return `[edit_task: #${id} failed]`;
+                    }
+                    const dueStr = updated.due_at ? ` · ${new Date(updated.due_at).toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' })}` : '';
+                    const catStr = updated.category ? ` · [${updated.category}]` : '';
+                    await this.whatsapp.sendReply(jid, `✏️ עודכנה #${updated.id}: ${updated.title}${catStr}${dueStr}`, message);
+                    return `[edit_task: #${id} patched=${Object.keys(patch).join(',')}]`;
                 }
                 case 'complete_task': {
                     let id = args.id ? Number(args.id) : undefined;

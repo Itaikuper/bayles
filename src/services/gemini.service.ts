@@ -498,32 +498,50 @@ const appendProjectNoteDeclaration: FunctionDeclaration = {
 // --- Tasks (owner mode) ---
 const addTaskDeclaration: FunctionDeclaration = {
   name: 'add_task',
-  description: 'Add a task / TODO. Use when the owner says "תזכיר לי", "אני צריך", "תוסיף משימה", "remind me to", "I need to", or otherwise asks to track something to do. If a due date/time is given, set due_iso to ISO 8601.',
+  description: 'Add a task / TODO. Use when the owner says "תזכיר לי", "אני צריך", "תוסיף משימה", "זאת משימה", "משימה לביצוע", "remind me to", "I need to", "add as todo". Also use when the owner forwards a message and labels it as a task — in that case, REWRITE the forwarded content into a clear imperative action ("Send Q3 numbers to boss by Friday"), don\'t transcribe the raw forward. Infer due_iso from sender\'s wording ("by Friday", "עד יום שישי"). Always pick a category.',
   parameters: {
     type: Type.OBJECT,
     properties: {
-      title: { type: Type.STRING, description: 'Short task title in Hebrew.' },
+      title: { type: Type.STRING, description: 'Short, imperative task title in Hebrew (e.g. "לשלוח את מספרי Q3 לאסף", not "אסף ביקש את Q3"). Rewrite forwarded requests as an action verb on the owner\'s part.' },
+      category: { type: Type.STRING, description: 'Category bucket. Common values: "work" (עבודה), "personal" (אישי), "family" (משפחה), "home" (בית). Default to "work" if the source looks work-related (forwarded from boss/client/colleague, mentions deadlines/deliverables); "personal" otherwise. Free text — use existing categories from list_categories if available.' },
       due_iso: { type: Type.STRING, description: 'Optional due time in ISO 8601 (e.g. 2026-04-14T10:00:00+03:00). Leave empty if no time given.' },
-      notes: { type: Type.STRING, description: 'Optional longer notes.' },
+      notes: { type: Type.STRING, description: 'Optional longer notes — good place to preserve the original forwarded text verbatim.' },
     },
-    required: ['title'],
+    required: ['title', 'category'],
   },
 };
 
 const listTasksDeclaration: FunctionDeclaration = {
   name: 'list_tasks',
-  description: 'List the owner\'s tasks. Use when asked "מה המשימות שלי?", "what\'s on my list?", "מה יש לי לעשות?".',
+  description: 'List the owner\'s tasks, ordered by due date (soonest first, undated last). Use when asked "מה המשימות שלי?", "what\'s on my list?", "מה יש לי לעשות?", "מה יש בעבודה?", "what\'s on my work list?". If the owner mentions a category in their question (work/עבודה, personal/אישי, etc.), pass it as the category filter.',
   parameters: {
     type: Type.OBJECT,
     properties: {
-      filter: { type: Type.STRING, description: 'Optional filter: "active" (default — pending+due-snoozed), "pending", "done", "snoozed", or "all".' },
+      filter: { type: Type.STRING, description: 'Optional status filter: "active" (default — pending + due-snoozed), "pending", "done", "snoozed", or "all".' },
+      category: { type: Type.STRING, description: 'Optional category filter ("work", "personal", "family", "home", etc.). Case-insensitive. Omit to list across all categories.' },
+    },
+  },
+};
+
+const editTaskDeclaration: FunctionDeclaration = {
+  name: 'edit_task',
+  description: 'Edit an existing task — change its title, category, due date, or notes. Use when the owner says "תעדכן את #N", "שנה את הכותרת של X ל-Y", "תעביר את #N לקטגוריה אישי", "דחה את #N ליום רביעי". Provide id (preferred) or query (substring of title) plus at least one field to change.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      id: { type: Type.NUMBER, description: 'Task id (preferred).' },
+      query: { type: Type.STRING, description: 'Substring of the task title — used if id is unknown.' },
+      title: { type: Type.STRING, description: 'New title. Leave empty to keep.' },
+      category: { type: Type.STRING, description: 'New category. Leave empty to keep.' },
+      due_iso: { type: Type.STRING, description: 'New due time (ISO 8601). Pass empty string to CLEAR the due date.' },
+      notes: { type: Type.STRING, description: 'New notes. Pass empty string to clear.' },
     },
   },
 };
 
 const completeTaskDeclaration: FunctionDeclaration = {
   name: 'complete_task',
-  description: 'Mark a task as done. Provide either id (preferred) or query (substring of title). Use when the owner says "סיימתי X", "X done", "תסמן את X".',
+  description: 'Mark a task as done. Provide either id (preferred) or query (substring of title). Use when the owner says "סיימתי X", "עשיתי את #N", "X done", "תסמן את X".',
   parameters: {
     type: Type.OBJECT,
     properties: {
@@ -789,6 +807,7 @@ Messages in [brackets] in conversation history are factual records of actions yo
           appendProjectNoteDeclaration,
           addTaskDeclaration,
           listTasksDeclaration,
+          editTaskDeclaration,
           completeTaskDeclaration,
           snoozeTaskDeclaration,
         );
