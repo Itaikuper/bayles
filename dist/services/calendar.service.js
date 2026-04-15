@@ -82,7 +82,7 @@ export class CalendarService {
                     const bTime = b.start?.dateTime || b.start?.date || '';
                     return aTime.localeCompare(bTime);
                 });
-                // Owner JID gets the rich morning briefing (calendar + overnight emails + tasks)
+                // Owner JID gets the morning briefing (calendar + open tasks; emails intentionally excluded per owner preference)
                 if (config.gmailOwnerJid && jid === config.gmailOwnerJid) {
                     const message = await this.composeOwnerMorningBriefing(allEvents);
                     await this.whatsapp.sendTextMessage(jid, message);
@@ -101,7 +101,13 @@ export class CalendarService {
             }
         }
     }
-    /** Owner-only morning briefing: calendar today + overnight emails + top pending tasks. */
+    /**
+     * Owner-only morning briefing: calendar today + open tasks.
+     * Email summary was intentionally removed per owner preference (2026-04-15) — owner
+     * relies on the 7-minute gmail poller for real-time email notifications and doesn't
+     * want a consolidated dump in the morning message. If you re-add it, guard it behind
+     * a per-owner toggle rather than making it unconditional.
+     */
     async composeOwnerMorningBriefing(events) {
         const ownerJid = config.gmailOwnerJid;
         const parts = ['☀️ *תדריך בוקר*\n'];
@@ -113,22 +119,7 @@ export class CalendarService {
             parts.push('📅 *יומן היום:*');
             parts.push(this.formatEventList(events).replace('📅 אירועים :\n\n', ''));
         }
-        // Overnight emails (last ~14h, watched labels + senders, unread)
-        if (this.gmailService) {
-            try {
-                const recent = await this.gmailService.listRecentEmails(ownerJid, { query: 'is:unread newer_than:14h', max: 8 });
-                if (recent.length > 0) {
-                    parts.push('\n📧 *מיילים מהלילה:*');
-                    for (const e of recent.slice(0, 8)) {
-                        parts.push(`• ${e.subject || '(ללא נושא)'} — ${e.from.split('<')[0].trim()}`);
-                    }
-                }
-            }
-            catch (err) {
-                logger.warn('Morning briefing: failed to fetch overnight emails', err);
-            }
-        }
-        // Top pending tasks
+        // Open tasks (top 5 by due-date ordering)
         try {
             const tasks = getTaskRepository().list(ownerJid, 'active');
             if (tasks.length > 0) {
@@ -137,6 +128,9 @@ export class CalendarService {
                     const due = t.due_at ? ` (עד ${new Date(t.due_at).toLocaleDateString('he-IL', { timeZone: 'Asia/Jerusalem' })})` : '';
                     parts.push(`◻️ #${t.id} ${t.title}${due}`);
                 }
+            }
+            else {
+                parts.push('\n📋 *משימות פתוחות:* אין 🎉');
             }
         }
         catch (err) {

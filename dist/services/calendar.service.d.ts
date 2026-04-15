@@ -14,7 +14,13 @@ export declare class CalendarService {
     start(): void;
     stop(): void;
     sendDailySummaries(): Promise<void>;
-    /** Owner-only morning briefing: calendar today + overnight emails + top pending tasks. */
+    /**
+     * Owner-only morning briefing: calendar today + open tasks.
+     * Email summary was intentionally removed per owner preference (2026-04-15) — owner
+     * relies on the 7-minute gmail poller for real-time email notifications and doesn't
+     * want a consolidated dump in the morning message. If you re-add it, guard it behind
+     * a per-owner toggle rather than making it unconditional.
+     */
     private composeOwnerMorningBriefing;
     checkAndSendReminders(): Promise<void>;
     listEvents(calendarId: string, timeMin: Date, timeMax: Date, query?: string): Promise<calendar_v3.Schema$Event[]>;
