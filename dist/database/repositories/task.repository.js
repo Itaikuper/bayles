@@ -126,10 +126,16 @@ export class TaskRepository {
      *   - status='active' → pending OR (snoozed AND past due_until)
      *   - status=<other> → exact status match
      *   - category → case-insensitive category filter (combinable with status)
+     *
+     * After delete, compacts `sqlite_sequence.tasks` down to MAX(id) of remaining rows.
+     * This prevents ugly ID jumps ("I cleared the list, why is my new task #47?"). IDs
+     * still never duplicate live rows, but after a mass cleanup the next add picks up
+     * just above the highest surviving id instead of the highest-ever-used id.
      */
     removeBulk(jid, filter = {}) {
         const db = getDatabase();
         const cat = filter.category?.trim().toLowerCase() || undefined;
+        let changes = 0;
         if (filter.status === 'active') {
             const res = db.prepare(`
         DELETE FROM tasks
@@ -137,19 +143,29 @@ export class TaskRepository {
           AND (status = 'pending' OR (status = 'snoozed' AND snooze_until <= ?))
           ${cat ? 'AND LOWER(category) = ?' : ''}
       `).run(...(cat ? [jid, Date.now(), cat] : [jid, Date.now()]));
-            return res.changes;
+            changes = res.changes;
         }
-        if (filter.status) {
+        else if (filter.status) {
             const res = db.prepare(`
         DELETE FROM tasks WHERE jid = ? AND status = ? ${cat ? 'AND LOWER(category) = ?' : ''}
       `).run(...(cat ? [jid, filter.status, cat] : [jid, filter.status]));
-            return res.changes;
+            changes = res.changes;
         }
-        if (cat) {
+        else if (cat) {
             const res = db.prepare('DELETE FROM tasks WHERE jid = ? AND LOWER(category) = ?').run(jid, cat);
-            return res.changes;
+            changes = res.changes;
         }
-        throw new Error('removeBulk requires at least status or category filter');
+        else {
+            throw new Error('removeBulk requires at least status or category filter');
+        }
+        if (changes > 0) {
+            // Compact the auto-increment counter to the highest surviving id
+            // (or 0 if the table is now empty). sqlite_sequence is a system table that
+            // backs AUTOINCREMENT — writing to it is supported and safe.
+            const maxRow = db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM tasks').get();
+            db.prepare("UPDATE sqlite_sequence SET seq = ? WHERE name = 'tasks'").run(maxRow.m);
+        }
+        return changes;
     }
     snooze(id, untilMs) {
         const db = getDatabase();

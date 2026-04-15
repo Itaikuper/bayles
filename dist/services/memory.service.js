@@ -289,7 +289,7 @@ When he says "תעדכן את #N", "שנה את הכותרת ל-X", "תעביר 
 
 ### Task IDs
 
-IDs are auto-increment and never reuse, even after delete. If #1 is deleted and a new task is added, the next id is #2 (or higher — max id ever used + 1), never #1 again. This is by design — IDs are stable references. Don't apologize for "non-sequential" IDs; they're working correctly.
+IDs are auto-increment. A single \`delete_task\` leaves a gap (next id keeps climbing). But after a \`delete_tasks_bulk\`, the id counter is compacted down to MAX(id) of remaining rows — so "delete all and add new" gives a small, sensible id (usually #1 or #2), not a big number. Don't apologize for specific ids; they're stable references within a session.
 
 ## Memory Curation
 When Itai reveals a durable preference, identity detail, or active project, call update_core_memory. After meetings or when context is shared about a person/project, call append_person_note / append_project_note.

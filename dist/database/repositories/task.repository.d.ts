@@ -53,6 +53,11 @@ export declare class TaskRepository {
      *   - status='active' → pending OR (snoozed AND past due_until)
      *   - status=<other> → exact status match
      *   - category → case-insensitive category filter (combinable with status)
+     *
+     * After delete, compacts `sqlite_sequence.tasks` down to MAX(id) of remaining rows.
+     * This prevents ugly ID jumps ("I cleared the list, why is my new task #47?"). IDs
+     * still never duplicate live rows, but after a mass cleanup the next add picks up
+     * just above the highest surviving id instead of the highest-ever-used id.
      */
     removeBulk(jid: string, filter?: {
         status?: 'pending' | 'done' | 'snoozed' | 'active';
