@@ -131,13 +131,18 @@ export class TaskRepository {
 
   /**
    * Hard-delete a task by id. Row is physically removed from the tasks table.
-   * The id is NOT reused — sqlite_sequence.tasks tracks the max-ever id
-   * (INTEGER PRIMARY KEY AUTOINCREMENT semantics). This is distinct from
-   * complete() which leaves the row in place with status='done'.
+   * After delete, compacts sqlite_sequence.tasks down to MAX(id) of remaining rows
+   * so the next add picks up just above the highest surviving id (no ugly ID
+   * climbing from gaps). Distinct from complete() which keeps the row with
+   * status='done'.
    */
   remove(id: number): boolean {
     const db = getDatabase();
     const res = db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
+    if (res.changes > 0) {
+      const maxRow = db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM tasks').get() as { m: number };
+      db.prepare("UPDATE sqlite_sequence SET seq = ? WHERE name = 'tasks'").run(maxRow.m);
+    }
     return res.changes > 0;
   }
 

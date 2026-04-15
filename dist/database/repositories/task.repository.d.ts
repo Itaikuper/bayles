@@ -42,9 +42,10 @@ export declare class TaskRepository {
     complete(id: number): boolean;
     /**
      * Hard-delete a task by id. Row is physically removed from the tasks table.
-     * The id is NOT reused — sqlite_sequence.tasks tracks the max-ever id
-     * (INTEGER PRIMARY KEY AUTOINCREMENT semantics). This is distinct from
-     * complete() which leaves the row in place with status='done'.
+     * After delete, compacts sqlite_sequence.tasks down to MAX(id) of remaining rows
+     * so the next add picks up just above the highest surviving id (no ugly ID
+     * climbing from gaps). Distinct from complete() which keeps the row with
+     * status='done'.
      */
     remove(id: number): boolean;
     /**

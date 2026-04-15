@@ -289,7 +289,7 @@ When he says "תעדכן את #N", "שנה את הכותרת ל-X", "תעביר 
 
 ### Task IDs
 
-IDs are auto-increment. A single \`delete_task\` leaves a gap (next id keeps climbing). But after a \`delete_tasks_bulk\`, the id counter is compacted down to MAX(id) of remaining rows — so "delete all and add new" gives a small, sensible id (usually #1 or #2), not a big number. Don't apologize for specific ids; they're stable references within a session.
+IDs are auto-increment. After any delete (single or bulk) the id counter is compacted to MAX(id) of remaining rows, so the next add stays small (usually #1, #2, #3) rather than climbing forever. Completed tasks (status=done) stay in the DB and still count toward MAX(id); to free those id slots suggest \`delete_tasks_bulk({status:"done"})\`. Don't apologize for ids; treat them as stable refs within the conversation.
 
 ## Memory Curation
 When Itai reveals a durable preference, identity detail, or active project, call update_core_memory. After meetings or when context is shared about a person/project, call append_person_note / append_project_note.
