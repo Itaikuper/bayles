@@ -10,6 +10,10 @@ import { getUserMemoryRepository } from '../database/repositories/user-memory.re
 import { getConversationHistoryRepository } from '../database/repositories/conversation-history.repository.js';
 import { getChatConfigRepository } from '../database/repositories/chat-config.repository.js';
 import { getMemoryService } from './memory.service.js';
+/** Safety valve: stop the agentic loop after N iterations (LangChain convention). */
+const MAX_TOOL_ITERATIONS = 8;
+/** Safety valve: stop the agentic loop after this wall time (ms). */
+const MAX_WALL_TIME_MS = 60_000;
 // Function declaration for natural language scheduling
 const createScheduleDeclaration = {
     name: 'create_schedule',
@@ -539,6 +543,23 @@ const snoozeTaskDeclaration = {
         required: ['until_iso'],
     },
 };
+const deleteTasksBulkDeclaration = {
+    name: 'delete_tasks_bulk',
+    description: 'Delete MANY tasks in one call matching a filter. Use when the owner says "מחק את כל המשימות", "תמחק הכל", "delete all open tasks", "clear my work list", "wipe pending tasks". ' +
+        'Must pass at least one of: status (active/pending/done/snoozed) or category. Refuses empty filter as a safety valve. ' +
+        'Prefer this over chaining multiple delete_task calls when the owner said "all" / "הכל" / "בתפזורת".',
+    parameters: {
+        type: Type.OBJECT,
+        properties: {
+            status: {
+                type: Type.STRING,
+                enum: ['active', 'pending', 'done', 'snoozed'],
+                description: 'Status filter. "active" = pending OR snoozed-past-due. Most common choice for "delete all open tasks".',
+            },
+            category: { type: Type.STRING, description: 'Optional category filter (e.g., "work"). Omit to match all categories.' },
+        },
+    },
+};
 // --- Workflow-as-tool declarations (owner mode) ---
 // These wrap the deterministic workflow functions (recipient resolution, Hebrew date parsing,
 // multi-calendar routing). The model decides when to call them — no pre-classifier hijack.
@@ -657,7 +678,7 @@ export class GeminiService {
             .filter(Boolean)
             .join('\n');
     }
-    async generateResponse(jid, userMessage, customPrompt, tenantId = 'default', senderJid, intentHint) {
+    async generateResponse(jid, userMessage, customPrompt, tenantId = 'default', senderJid, intentHint, dispatch) {
         try {
             const mode = this.getAssistantMode(jid, senderJid);
             // Get or initialize conversation history (scoped by tenant)
@@ -734,7 +755,7 @@ Messages in [brackets] in conversation history are factual records of actions yo
                 // Raw calendar tools (for explicit ISO dates / simple cases)
                 listCalendarEventsDeclaration, createCalendarEventDeclaration, updateCalendarEventDeclaration, deleteCalendarEventDeclaration, 
                 // Gmail
-                gmailListRecentDeclaration, gmailReadEmailDeclaration, gmailDraftReplyDeclaration, gmailDraftNewDeclaration, gmailAddWatchLabelDeclaration, gmailRemoveWatchLabelDeclaration, gmailListWatchLabelsDeclaration, gmailAddWatchSenderDeclaration, gmailRemoveWatchSenderDeclaration, gmailListWatchSendersDeclaration, gmailBlockSenderDeclaration, gmailUnblockSenderDeclaration, gmailListBlockedDeclaration, gmailEnablePersonalInboxDeclaration, gmailDisablePersonalInboxDeclaration, createScheduleDeclaration, searchMemoryDeclaration, updateCoreMemoryDeclaration, appendPersonNoteDeclaration, appendProjectNoteDeclaration, addTaskDeclaration, listTasksDeclaration, editTaskDeclaration, completeTaskDeclaration, deleteTaskDeclaration, snoozeTaskDeclaration);
+                gmailListRecentDeclaration, gmailReadEmailDeclaration, gmailDraftReplyDeclaration, gmailDraftNewDeclaration, gmailAddWatchLabelDeclaration, gmailRemoveWatchLabelDeclaration, gmailListWatchLabelsDeclaration, gmailAddWatchSenderDeclaration, gmailRemoveWatchSenderDeclaration, gmailListWatchSendersDeclaration, gmailBlockSenderDeclaration, gmailUnblockSenderDeclaration, gmailListBlockedDeclaration, gmailEnablePersonalInboxDeclaration, gmailDisablePersonalInboxDeclaration, createScheduleDeclaration, searchMemoryDeclaration, updateCoreMemoryDeclaration, appendPersonNoteDeclaration, appendProjectNoteDeclaration, addTaskDeclaration, listTasksDeclaration, editTaskDeclaration, completeTaskDeclaration, deleteTaskDeclaration, deleteTasksBulkDeclaration, snoozeTaskDeclaration);
             }
             else {
                 // Default mode: existing keyword-gated tool selection.
@@ -788,7 +809,78 @@ Messages in [brackets] in conversation history are factual records of actions yo
                     ...history,
                 ],
             });
-            // Send message and get response
+            // ──────────────────────────────────────────────────────────────────────
+            // AGENTIC LOOP (when a dispatcher is provided by the caller)
+            //
+            // Industry-standard pattern (Google Gemini docs, OpenAI, Anthropic, LangChain):
+            // keep sending tool results back until the model responds with text instead
+            // of more functionCalls. Bounded by iteration + wall-time caps.
+            //
+            // This is Itai's "execution flag" — the LLM is the manager/planner, the code
+            // owns the loop and decides when to stop. The LLM stops naturally by emitting
+            // text; code hard-stops on caps.
+            // ──────────────────────────────────────────────────────────────────────
+            if (dispatch) {
+                const startedAt = Date.now();
+                // First turn: plain string. Subsequent turns: array of functionResponse parts.
+                let nextMessage = userMessage;
+                let finalText = '';
+                let iter = 0;
+                for (; iter < MAX_TOOL_ITERATIONS; iter++) {
+                    if (Date.now() - startedAt > MAX_WALL_TIME_MS) {
+                        logger.warn(`[loop] Wall-time exceeded ${MAX_WALL_TIME_MS}ms at iter=${iter}`);
+                        finalText = finalText || 'סיימתי חלק מהפעולות אבל נגמר הזמן. נסה שוב או פצל את הבקשה.';
+                        break;
+                    }
+                    const response = await chat.sendMessage({ message: nextMessage });
+                    const calls = response.functionCalls ?? [];
+                    // Standard termination: no function calls → the model is done.
+                    if (calls.length === 0) {
+                        finalText = response.text || '';
+                        break;
+                    }
+                    // Execute ALL parallel function calls in this response (fixes the old [0] bug).
+                    const responseParts = [];
+                    for (const call of calls) {
+                        if (!call.name)
+                            continue;
+                        logger.info(`[loop iter=${iter}] Function call: ${call.name}`, call.args);
+                        try {
+                            const out = await dispatch(call.name, (call.args || {}));
+                            responseParts.push({
+                                functionResponse: { name: call.name, response: { result: out.result } },
+                            });
+                        }
+                        catch (err) {
+                            logger.warn(`[loop iter=${iter}] ${call.name} threw:`, err);
+                            responseParts.push({
+                                functionResponse: { name: call.name, response: { error: err.message } },
+                            });
+                        }
+                    }
+                    // Feed all tool results back as a single user-role message of parts.
+                    nextMessage = responseParts;
+                }
+                if (iter === MAX_TOOL_ITERATIONS) {
+                    logger.warn(`[loop] Hit MAX_TOOL_ITERATIONS=${MAX_TOOL_ITERATIONS} — probable loop or unfinished chain`);
+                    finalText = finalText || 'סיימתי חלק מהפעולות, אבל התקע. נסה שוב או פצל את הבקשה.';
+                }
+                // Persist the user message + final text to history (intermediate tool calls are
+                // kept inside the `chat` object but we only record the human-visible exchange).
+                history.push({ role: 'user', parts: [{ text: userMessage }] }, { role: 'model', parts: [{ text: finalText }] });
+                while (history.length > this.maxHistoryLength * 2) {
+                    history.shift();
+                }
+                this.conversationHistory.set(historyKey, history);
+                getConversationHistoryRepository().addExchange(jid, userMessage, finalText, tenantId);
+                return { type: 'text', text: finalText };
+            }
+            // ──────────────────────────────────────────────────────────────────────
+            // LEGACY SINGLE-SHOT PATH (callers that don't pass a dispatcher)
+            // Used by birthday.service.ts, index.ts, and other flows that still rely on
+            // the old "return function_call, caller dispatches, caller reinvokes" loop.
+            // Keep unchanged to avoid regressions on those paths.
+            // ──────────────────────────────────────────────────────────────────────
             const response = await chat.sendMessage({
                 message: userMessage,
             });

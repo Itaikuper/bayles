@@ -13,6 +13,22 @@ import { getChatConfigRepository } from '../database/repositories/chat-config.re
 import { getMemoryService } from './memory.service.js';
 import type { ChatHistory, GeminiResponse } from '../types/index.js';
 
+/**
+ * Dispatcher callback: executes a tool call and returns a structured result.
+ * Passed by message.handler to generateResponse() so the agentic loop can run tools
+ * and feed results back to the model. The result object is serialized into a
+ * Gemini `functionResponse` part verbatim, so it should be plain JSON-friendly data.
+ */
+export type Dispatcher = (
+  name: string,
+  args: Record<string, unknown>,
+) => Promise<{ result: unknown }>;
+
+/** Safety valve: stop the agentic loop after N iterations (LangChain convention). */
+const MAX_TOOL_ITERATIONS = 8;
+/** Safety valve: stop the agentic loop after this wall time (ms). */
+const MAX_WALL_TIME_MS = 60_000;
+
 // Function declaration for natural language scheduling
 const createScheduleDeclaration: FunctionDeclaration = {
   name: 'create_schedule',
@@ -577,6 +593,25 @@ const snoozeTaskDeclaration: FunctionDeclaration = {
   },
 };
 
+const deleteTasksBulkDeclaration: FunctionDeclaration = {
+  name: 'delete_tasks_bulk',
+  description:
+    'Delete MANY tasks in one call matching a filter. Use when the owner says "מחק את כל המשימות", "תמחק הכל", "delete all open tasks", "clear my work list", "wipe pending tasks". ' +
+    'Must pass at least one of: status (active/pending/done/snoozed) or category. Refuses empty filter as a safety valve. ' +
+    'Prefer this over chaining multiple delete_task calls when the owner said "all" / "הכל" / "בתפזורת".',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      status: {
+        type: Type.STRING,
+        enum: ['active', 'pending', 'done', 'snoozed'],
+        description: 'Status filter. "active" = pending OR snoozed-past-due. Most common choice for "delete all open tasks".',
+      },
+      category: { type: Type.STRING, description: 'Optional category filter (e.g., "work"). Omit to match all categories.' },
+    },
+  },
+};
+
 // --- Workflow-as-tool declarations (owner mode) ---
 // These wrap the deterministic workflow functions (recipient resolution, Hebrew date parsing,
 // multi-calendar routing). The model decides when to call them — no pre-classifier hijack.
@@ -706,6 +741,7 @@ export class GeminiService {
     tenantId: string = 'default',
     senderJid?: string,
     intentHint?: string,
+    dispatch?: Dispatcher,
   ): Promise<GeminiResponse> {
     try {
       const mode = this.getAssistantMode(jid, senderJid);
@@ -822,6 +858,7 @@ Messages in [brackets] in conversation history are factual records of actions yo
           editTaskDeclaration,
           completeTaskDeclaration,
           deleteTaskDeclaration,
+          deleteTasksBulkDeclaration,
           snoozeTaskDeclaration,
         );
       } else {
@@ -882,7 +919,88 @@ Messages in [brackets] in conversation history are factual records of actions yo
         ],
       });
 
-      // Send message and get response
+      // ──────────────────────────────────────────────────────────────────────
+      // AGENTIC LOOP (when a dispatcher is provided by the caller)
+      //
+      // Industry-standard pattern (Google Gemini docs, OpenAI, Anthropic, LangChain):
+      // keep sending tool results back until the model responds with text instead
+      // of more functionCalls. Bounded by iteration + wall-time caps.
+      //
+      // This is Itai's "execution flag" — the LLM is the manager/planner, the code
+      // owns the loop and decides when to stop. The LLM stops naturally by emitting
+      // text; code hard-stops on caps.
+      // ──────────────────────────────────────────────────────────────────────
+      if (dispatch) {
+        const startedAt = Date.now();
+        // First turn: plain string. Subsequent turns: array of functionResponse parts.
+        let nextMessage: string | Array<{ functionResponse: { name: string; response: Record<string, unknown> } }> = userMessage;
+        let finalText = '';
+        let iter = 0;
+
+        for (; iter < MAX_TOOL_ITERATIONS; iter++) {
+          if (Date.now() - startedAt > MAX_WALL_TIME_MS) {
+            logger.warn(`[loop] Wall-time exceeded ${MAX_WALL_TIME_MS}ms at iter=${iter}`);
+            finalText = finalText || 'סיימתי חלק מהפעולות אבל נגמר הזמן. נסה שוב או פצל את הבקשה.';
+            break;
+          }
+
+          const response = await chat.sendMessage({ message: nextMessage });
+          const calls = response.functionCalls ?? [];
+
+          // Standard termination: no function calls → the model is done.
+          if (calls.length === 0) {
+            finalText = response.text || '';
+            break;
+          }
+
+          // Execute ALL parallel function calls in this response (fixes the old [0] bug).
+          const responseParts: Array<{ functionResponse: { name: string; response: Record<string, unknown> } }> = [];
+          for (const call of calls) {
+            if (!call.name) continue;
+            logger.info(`[loop iter=${iter}] Function call: ${call.name}`, call.args);
+            try {
+              const out = await dispatch(call.name, (call.args || {}) as Record<string, unknown>);
+              responseParts.push({
+                functionResponse: { name: call.name, response: { result: out.result } },
+              });
+            } catch (err) {
+              logger.warn(`[loop iter=${iter}] ${call.name} threw:`, err);
+              responseParts.push({
+                functionResponse: { name: call.name, response: { error: (err as Error).message } },
+              });
+            }
+          }
+
+          // Feed all tool results back as a single user-role message of parts.
+          nextMessage = responseParts;
+        }
+
+        if (iter === MAX_TOOL_ITERATIONS) {
+          logger.warn(`[loop] Hit MAX_TOOL_ITERATIONS=${MAX_TOOL_ITERATIONS} — probable loop or unfinished chain`);
+          finalText = finalText || 'סיימתי חלק מהפעולות, אבל התקע. נסה שוב או פצל את הבקשה.';
+        }
+
+        // Persist the user message + final text to history (intermediate tool calls are
+        // kept inside the `chat` object but we only record the human-visible exchange).
+        history.push(
+          { role: 'user', parts: [{ text: userMessage }] },
+          { role: 'model', parts: [{ text: finalText }] },
+        );
+        while (history.length > this.maxHistoryLength * 2) {
+          history.shift();
+        }
+        this.conversationHistory.set(historyKey, history);
+        getConversationHistoryRepository().addExchange(jid, userMessage, finalText, tenantId);
+
+        return { type: 'text', text: finalText };
+      }
+
+      // ──────────────────────────────────────────────────────────────────────
+      // LEGACY SINGLE-SHOT PATH (callers that don't pass a dispatcher)
+      // Used by birthday.service.ts, index.ts, and other flows that still rely on
+      // the old "return function_call, caller dispatches, caller reinvokes" loop.
+      // Keep unchanged to avoid regressions on those paths.
+      // ──────────────────────────────────────────────────────────────────────
       const response = await chat.sendMessage({
         message: userMessage,
       });

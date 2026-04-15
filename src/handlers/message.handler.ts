@@ -1,6 +1,6 @@
 import { proto } from '@whiskeysockets/baileys';
 import { WhatsAppService } from '../services/whatsapp.service.js';
-import { GeminiService } from '../services/gemini.service.js';
+import { GeminiService, type Dispatcher } from '../services/gemini.service.js';
 import { SchedulerService } from '../services/scheduler.service.js';
 import { BotControlService } from '../services/bot-control.service.js';
 import { BirthdayService } from '../services/birthday.service.js';
@@ -256,6 +256,122 @@ export class MessageHandler {
         ? `${forwardMarker}${quotedBlock}[${message.pushName}]: ${cleanText}`
         : `${forwardMarker}${quotedBlock}${cleanText}`;
 
+      // ──────────────────────────────────────────────────────────────────────
+      // OWNER MODE: agentic loop via dispatcher callback.
+      // The loop in generateResponse keeps sending tool results back to the model
+      // until it stops emitting functionCalls. This is what unblocks multi-step
+      // requests like "delete all open tasks AND add a new one".
+      //
+      // NON-OWNER MODE: stays on the legacy single-shot path below. Group chats
+      // don't chain multiple tool calls per turn in practice, and this keeps the
+      // blast radius small.
+      // ──────────────────────────────────────────────────────────────────────
+      const isOwner = this.gemini.isOwnerMode(jid, sender || undefined);
+      if (isOwner) {
+        const dispatch: Dispatcher = async (name, args) => {
+          try {
+            // Smart workflow tools — side-effect: send their own WhatsApp reply.
+            // Return a short note so the model knows the user was already notified.
+            if (name === 'draft_new_email' && this.gmailService) {
+              const a = args as { recipient_hint: string; topic: string; subject_hint?: string };
+              await runEmailNewWorkflow(
+                jid,
+                { recipient_hint: a.recipient_hint, topic_hint: a.topic, subject_hint: a.subject_hint },
+                message,
+                { gemini: this.gemini, gmail: this.gmailService, whatsapp: this.whatsapp },
+              );
+              return { result: { ok: true, note: 'draft created, user notified via WhatsApp' } };
+            }
+            if (name === 'list_calendar_smart' && this.calendarService) {
+              const a = args as { date_phrase: string; calendar_hint?: string; query_hint?: string };
+              await runCalendarListWorkflow(
+                jid, a, message,
+                { gemini: this.gemini, calendar: this.calendarService, whatsapp: this.whatsapp },
+              );
+              return { result: { ok: true, note: 'events listed, user notified via WhatsApp' } };
+            }
+            if (name === 'create_calendar_smart' && this.calendarService) {
+              const a = args as { summary_hint: string; date_phrase?: string; time_phrase?: string; duration_phrase?: string; calendar_hint?: string };
+              await runCalendarCreateWorkflow(
+                jid, a, message,
+                { gemini: this.gemini, calendar: this.calendarService, whatsapp: this.whatsapp },
+              );
+              return { result: { ok: true, note: 'event created, user notified via WhatsApp' } };
+            }
+
+            // Task tools — STRUCTURED result so the model can reason off actual IDs.
+            // No WhatsApp send inside — the model's final text is the user reply.
+            if (['add_task', 'list_tasks', 'edit_task', 'complete_task', 'delete_task', 'delete_tasks_bulk', 'snooze_task'].includes(name)) {
+              return { result: await this.handleTaskFunctionStructured(jid, name, args) };
+            }
+
+            // Memory tools — existing handler sends WhatsApp; wrap its summary string as result.
+            if (['search_memory', 'update_core_memory', 'append_person_note', 'append_project_note'].includes(name)) {
+              const summary = await this.handleMemoryFunction(jid, name, args, message);
+              return { result: { summary: summary || 'done' } };
+            }
+
+            // Gmail tools — existing handler sends WhatsApp; wrap summary as result.
+            if (name.startsWith('gmail_')) {
+              const summary = await this.handleGmailFunction(jid, name, args, message);
+              return { result: { summary: summary || 'done' } };
+            }
+
+            // Raw calendar tools.
+            if (name === 'list_calendar_events') {
+              const summary = await this.handleCalendarList(jid, args as unknown as CalendarListArgs, message);
+              return { result: { summary: summary || 'done' } };
+            }
+            if (name === 'create_calendar_event') {
+              const summary = await this.handleCalendarCreate(jid, args as unknown as CalendarCreateArgs, message);
+              return { result: { summary: summary || 'done' } };
+            }
+            if (name === 'update_calendar_event') {
+              const summary = await this.handleCalendarUpdate(jid, args as unknown as CalendarUpdateArgs, message);
+              return { result: { summary: summary || 'done' } };
+            }
+            if (name === 'delete_calendar_event') {
+              const summary = await this.handleCalendarDelete(jid, args as unknown as CalendarDeleteArgs, message);
+              return { result: { summary: summary || 'done' } };
+            }
+
+            // Owner-available misc tools.
+            if (name === 'create_schedule') {
+              const summary = await this.handleScheduleFunctionCall(jid, args as unknown as ScheduleArgs, message);
+              return { result: { summary: summary || 'done' } };
+            }
+
+            logger.warn(`[dispatch] unknown owner tool: ${name}`);
+            return { result: { error: `unknown_tool: ${name}` } };
+          } catch (err) {
+            logger.error(`[dispatch] ${name} threw:`, err);
+            return { result: { error: (err as Error).message } };
+          }
+        };
+
+        const response = await this.gemini.generateResponse(
+          jid,
+          messageForAI,
+          customPrompt,
+          'default',
+          sender || undefined,
+          intentHint,
+          dispatch,
+        );
+
+        // The loop always returns type:'text'. Send the model's final reply if any.
+        if (response.text && response.text.trim().length > 0) {
+          await this.sendResponse(jid, response.text, message);
+          const senderJid = sender || jid;
+          this.gemini.extractUserFacts(senderJid, cleanText, response.text)
+            .catch(err => logger.warn('[memory] Extraction failed:', err));
+        }
+        return;
+      }
+
+      // ──────────────────────────────────────────────────────────────────────
+      // NON-OWNER (group/default) MODE: legacy single-shot path preserved.
+      // ──────────────────────────────────────────────────────────────────────
       const response = await this.gemini.generateResponse(
         jid,
         messageForAI,
@@ -268,34 +384,7 @@ export class MessageHandler {
       if (response.type === 'function_call' && response.functionCall) {
         let actionSummary: string | null = null;
 
-        if (response.functionCall.name === 'draft_new_email' && this.gmailService) {
-          const args = response.functionCall.args as { recipient_hint: string; topic: string; subject_hint?: string };
-          await runEmailNewWorkflow(
-            jid,
-            { recipient_hint: args.recipient_hint, topic_hint: args.topic, subject_hint: args.subject_hint },
-            message,
-            { gemini: this.gemini, gmail: this.gmailService, whatsapp: this.whatsapp },
-          );
-          actionSummary = `[triggered draft_new_email for "${args.recipient_hint}"]`;
-        } else if (response.functionCall.name === 'list_calendar_smart' && this.calendarService) {
-          const args = response.functionCall.args as { date_phrase: string; calendar_hint?: string; query_hint?: string };
-          await runCalendarListWorkflow(
-            jid,
-            args,
-            message,
-            { gemini: this.gemini, calendar: this.calendarService, whatsapp: this.whatsapp },
-          );
-          actionSummary = `[triggered list_calendar_smart for "${args.date_phrase}"]`;
-        } else if (response.functionCall.name === 'create_calendar_smart' && this.calendarService) {
-          const args = response.functionCall.args as { summary_hint: string; date_phrase?: string; time_phrase?: string; duration_phrase?: string; calendar_hint?: string };
-          await runCalendarCreateWorkflow(
-            jid,
-            args,
-            message,
-            { gemini: this.gemini, calendar: this.calendarService, whatsapp: this.whatsapp },
-          );
-          actionSummary = `[triggered create_calendar_smart: "${args.summary_hint}"]`;
-        } else if (response.functionCall.name === 'create_schedule') {
+        if (response.functionCall.name === 'create_schedule') {
           const scheduleArgs = response.functionCall.args as unknown as ScheduleArgs;
           actionSummary = await this.handleScheduleFunctionCall(jid, scheduleArgs, message);
         } else if (response.functionCall.name === 'search_song') {
@@ -320,12 +409,6 @@ export class MessageHandler {
           actionSummary = await this.handleSendMessage(jid, response.functionCall.args as unknown as SendMessageArgs, message, senderName);
         } else if (response.functionCall.name === 'manage_chore_rotation') {
           actionSummary = await this.handleChoreRotation(jid, response.functionCall.args as unknown as ChoreRotationArgs, message);
-        } else if (response.functionCall.name?.startsWith('gmail_')) {
-          actionSummary = await this.handleGmailFunction(jid, response.functionCall.name, response.functionCall.args as Record<string, unknown>, message);
-        } else if (response.functionCall.name === 'search_memory' || response.functionCall.name === 'update_core_memory' || response.functionCall.name === 'append_person_note' || response.functionCall.name === 'append_project_note') {
-          actionSummary = await this.handleMemoryFunction(jid, response.functionCall.name, response.functionCall.args as Record<string, unknown>, message);
-        } else if (response.functionCall.name === 'add_task' || response.functionCall.name === 'list_tasks' || response.functionCall.name === 'edit_task' || response.functionCall.name === 'complete_task' || response.functionCall.name === 'delete_task' || response.functionCall.name === 'snooze_task') {
-          actionSummary = await this.handleTaskFunction(jid, response.functionCall.name, response.functionCall.args as Record<string, unknown>, message);
         } else {
           // Unknown function call - log and ignore
           logger.warn(`Unknown function call: ${response.functionCall.name}`);
@@ -2337,6 +2420,173 @@ ${config.botPrefix} Tell me a joke
       const errMsg = err instanceof Error ? err.message : 'unknown error';
       await this.whatsapp.sendReply(jid, `שגיאה ב-${name}: ${errMsg}`, message);
       return `[${name}: error]`;
+    }
+  }
+
+  /**
+   * Structured sibling of handleTaskFunction used by the agentic loop (owner mode).
+   *
+   * Differences vs handleTaskFunction:
+   *   1. Returns plain JSON data (ids, titles, counts, errors) instead of a status string.
+   *   2. Never sends a WhatsApp reply — the agentic loop's final model text is the
+   *      user-visible response. One message per turn, not one per tool call.
+   *   3. Supports `delete_tasks_bulk` for batch deletes.
+   */
+  private async handleTaskFunctionStructured(
+    jid: string,
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<unknown> {
+    if (!this.gmailService || !this.gmailService.isOwner(jid)) {
+      return { error: 'tasks are restricted to the owner' };
+    }
+    const repo = getTaskRepository();
+    try {
+      switch (name) {
+        case 'add_task': {
+          const title = String(args.title || '').trim();
+          if (!title) return { error: 'empty title' };
+          const dueIso = args.due_iso ? String(args.due_iso) : undefined;
+          const dueAt = dueIso ? Date.parse(dueIso) : undefined;
+          const category = args.category ? String(args.category).trim().toLowerCase() : undefined;
+          const task = repo.add(jid, title, {
+            notes: args.notes ? String(args.notes) : undefined,
+            dueAt: dueAt && !isNaN(dueAt) ? dueAt : undefined,
+            category,
+          });
+          return {
+            ok: true,
+            id: task.id,
+            title: task.title,
+            category: task.category,
+            due_at: task.due_at,
+          };
+        }
+        case 'list_tasks': {
+          const filter = (args.filter as string | undefined) || 'active';
+          const status = filter === 'all' ? undefined : (filter as 'pending' | 'done' | 'snoozed' | 'active');
+          const categoryFilter = args.category ? String(args.category).trim().toLowerCase() : undefined;
+          const tasks = repo.list(jid, status, categoryFilter);
+          return {
+            filter,
+            category: categoryFilter,
+            count: tasks.length,
+            tasks: tasks.slice(0, 30).map(t => ({
+              id: t.id,
+              title: t.title,
+              status: t.status,
+              category: t.category,
+              due_at: t.due_at,
+              notes: t.notes,
+            })),
+          };
+        }
+        case 'edit_task': {
+          let id = args.id ? Number(args.id) : undefined;
+          if (!id && args.query) {
+            const matches = repo.findByTitle(jid, String(args.query));
+            if (matches.length === 0) return { error: `no task matching "${args.query}"` };
+            if (matches.length > 1) {
+              return { error: 'ambiguous', matches: matches.map(m => ({ id: m.id, title: m.title })) };
+            }
+            id = matches[0].id;
+          }
+          if (!id) return { error: 'no id or query provided' };
+          const existing = repo.getById(id);
+          if (!existing || existing.jid !== jid) return { error: `task #${id} not found` };
+          const patch: { title?: string; notes?: string | null; category?: string | null; dueAt?: number | null } = {};
+          if (args.title !== undefined) patch.title = String(args.title).trim() || existing.title;
+          if (args.category !== undefined) {
+            const c = String(args.category).trim().toLowerCase();
+            patch.category = c || null;
+          }
+          if (args.due_iso !== undefined) {
+            const iso = String(args.due_iso).trim();
+            if (!iso) patch.dueAt = null;
+            else {
+              const t = Date.parse(iso);
+              if (!isNaN(t)) patch.dueAt = t;
+            }
+          }
+          if (args.notes !== undefined) {
+            const n = String(args.notes);
+            patch.notes = n.length === 0 ? null : n;
+          }
+          const updated = repo.edit(id, patch);
+          if (!updated) return { error: `failed to update #${id}` };
+          return {
+            ok: true,
+            id: updated.id,
+            title: updated.title,
+            category: updated.category,
+            due_at: updated.due_at,
+          };
+        }
+        case 'complete_task': {
+          let id = args.id ? Number(args.id) : undefined;
+          if (!id && args.query) {
+            const matches = repo.findByTitle(jid, String(args.query));
+            if (matches.length === 0) return { error: `no task matching "${args.query}"` };
+            if (matches.length > 1) {
+              return { error: 'ambiguous', matches: matches.map(m => ({ id: m.id, title: m.title })) };
+            }
+            id = matches[0].id;
+          }
+          if (!id) return { error: 'no id or query' };
+          const existing = repo.getById(id);
+          const ok = repo.complete(id);
+          return { ok, id, title: existing?.title };
+        }
+        case 'delete_task': {
+          let id = args.id ? Number(args.id) : undefined;
+          if (!id && args.query) {
+            const matches = repo.findByTitle(jid, String(args.query));
+            if (matches.length === 0) return { error: `no task matching "${args.query}"` };
+            if (matches.length > 1) {
+              return { error: 'ambiguous', matches: matches.map(m => ({ id: m.id, title: m.title })) };
+            }
+            id = matches[0].id;
+          }
+          if (!id) return { error: 'no id or query provided' };
+          const existing = repo.getById(id);
+          if (!existing || existing.jid !== jid) return { error: `task #${id} not found` };
+          const ok = repo.remove(id);
+          return { ok, id, title: existing.title };
+        }
+        case 'delete_tasks_bulk': {
+          const rawStatus = args.status as string | undefined;
+          const status = rawStatus && ['active', 'pending', 'done', 'snoozed'].includes(rawStatus)
+            ? (rawStatus as 'active' | 'pending' | 'done' | 'snoozed')
+            : undefined;
+          const category = args.category ? String(args.category).trim().toLowerCase() : undefined;
+          if (!status && !category) {
+            return { error: 'delete_tasks_bulk requires at least status or category filter' };
+          }
+          try {
+            const deleted = repo.removeBulk(jid, { status, category });
+            return { ok: true, deleted, filter: { status, category } };
+          } catch (err) {
+            return { error: (err as Error).message };
+          }
+        }
+        case 'snooze_task': {
+          let id = args.id ? Number(args.id) : undefined;
+          if (!id && args.query) {
+            const matches = repo.findByTitle(jid, String(args.query));
+            if (matches.length === 1) id = matches[0].id;
+          }
+          if (!id) return { error: 'no id' };
+          const until = Date.parse(String(args.until_iso));
+          if (isNaN(until)) return { error: 'bad until_iso' };
+          const ok = repo.snooze(id, until);
+          return { ok, id, until_ms: until };
+        }
+        default:
+          return { error: `unknown task tool: ${name}` };
+      }
+    } catch (err) {
+      logger.error(`[dispatch] task ${name} threw:`, err);
+      return { error: (err as Error).message };
     }
   }
 

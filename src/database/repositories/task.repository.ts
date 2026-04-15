@@ -141,6 +141,38 @@ export class TaskRepository {
     return res.changes > 0;
   }
 
+  /**
+   * Bulk hard-delete. Filter semantics identical to list(). Returns count deleted.
+   * Refuses empty filter as a safety valve so we never accidentally nuke everything.
+   *   - status='active' → pending OR (snoozed AND past due_until)
+   *   - status=<other> → exact status match
+   *   - category → case-insensitive category filter (combinable with status)
+   */
+  removeBulk(jid: string, filter: { status?: 'pending' | 'done' | 'snoozed' | 'active'; category?: string } = {}): number {
+    const db = getDatabase();
+    const cat = filter.category?.trim().toLowerCase() || undefined;
+    if (filter.status === 'active') {
+      const res = db.prepare(`
+        DELETE FROM tasks
+        WHERE jid = ?
+          AND (status = 'pending' OR (status = 'snoozed' AND snooze_until <= ?))
+          ${cat ? 'AND LOWER(category) = ?' : ''}
+      `).run(...(cat ? [jid, Date.now(), cat] : [jid, Date.now()]));
+      return res.changes;
+    }
+    if (filter.status) {
+      const res = db.prepare(`
+        DELETE FROM tasks WHERE jid = ? AND status = ? ${cat ? 'AND LOWER(category) = ?' : ''}
+      `).run(...(cat ? [jid, filter.status, cat] : [jid, filter.status]));
+      return res.changes;
+    }
+    if (cat) {
+      const res = db.prepare('DELETE FROM tasks WHERE jid = ? AND LOWER(category) = ?').run(jid, cat);
+      return res.changes;
+    }
+    throw new Error('removeBulk requires at least status or category filter');
+  }
+
   snooze(id: number, untilMs: number): boolean {
     const db = getDatabase();
     const now = Date.now();

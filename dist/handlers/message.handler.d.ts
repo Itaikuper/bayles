@@ -93,6 +93,16 @@ export declare class MessageHandler {
     private handleImageGeneration;
     private getHelpText;
     private handleTaskFunction;
+    /**
+     * Structured sibling of handleTaskFunction used by the agentic loop (owner mode).
+     *
+     * Differences vs handleTaskFunction:
+     *   1. Returns plain JSON data (ids, titles, counts, errors) instead of a status string.
+     *   2. Never sends a WhatsApp reply — the agentic loop's final model text is the
+     *      user-visible response. One message per turn, not one per tool call.
+     *   3. Supports `delete_tasks_bulk` for batch deletes.
+     */
+    private handleTaskFunctionStructured;
     private handleMemoryFunction;
     private handleGmailFunction;
 }

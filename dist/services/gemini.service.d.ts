@@ -1,4 +1,13 @@
 import type { GeminiResponse } from '../types/index.js';
+/**
+ * Dispatcher callback: executes a tool call and returns a structured result.
+ * Passed by message.handler to generateResponse() so the agentic loop can run tools
+ * and feed results back to the model. The result object is serialized into a
+ * Gemini `functionResponse` part verbatim, so it should be plain JSON-friendly data.
+ */
+export type Dispatcher = (name: string, args: Record<string, unknown>) => Promise<{
+    result: unknown;
+}>;
 export declare class GeminiService {
     private ai;
     private conversationHistory;
@@ -17,7 +26,7 @@ export declare class GeminiService {
      * the classifier only cares about user/model natural-language exchanges.
      */
     formatRecentForClassifier(jid: string, tenantId?: string, turns?: number): string;
-    generateResponse(jid: string, userMessage: string, customPrompt?: string, tenantId?: string, senderJid?: string, intentHint?: string): Promise<GeminiResponse>;
+    generateResponse(jid: string, userMessage: string, customPrompt?: string, tenantId?: string, senderJid?: string, intentHint?: string, dispatch?: Dispatcher): Promise<GeminiResponse>;
     generateAudioResponse(jid: string, audioBuffer: Buffer, mimeType: string, customPrompt?: string, contextPrefix?: string, tenantId?: string, senderJid?: string): Promise<string>;
     transcribeAudio(audioBuffer: Buffer, mimeType: string): Promise<string>;
     generateDocumentAnalysisResponse(jid: string, mediaBuffer: Buffer, mimeType: string, caption?: string, customPrompt?: string, contextPrefix?: string, fileName?: string, tenantId?: string): Promise<string>;

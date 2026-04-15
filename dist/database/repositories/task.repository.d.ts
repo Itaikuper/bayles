@@ -47,5 +47,16 @@ export declare class TaskRepository {
      * complete() which leaves the row in place with status='done'.
      */
     remove(id: number): boolean;
+    /**
+     * Bulk hard-delete. Filter semantics identical to list(). Returns count deleted.
+     * Refuses empty filter as a safety valve so we never accidentally nuke everything.
+     *   - status='active' → pending OR (snoozed AND past due_until)
+     *   - status=<other> → exact status match
+     *   - category → case-insensitive category filter (combinable with status)
+     */
+    removeBulk(jid: string, filter?: {
+        status?: 'pending' | 'done' | 'snoozed' | 'active';
+        category?: string;
+    }): number;
     snooze(id: number, untilMs: number): boolean;
 }
