@@ -109,6 +109,17 @@ export class TaskRepository {
         const res = db.prepare(`UPDATE tasks SET status='done', completed_at=?, updated_at=? WHERE id=? AND status != 'done'`).run(now, now, id);
         return res.changes > 0;
     }
+    /**
+     * Hard-delete a task by id. Row is physically removed from the tasks table.
+     * The id is NOT reused — sqlite_sequence.tasks tracks the max-ever id
+     * (INTEGER PRIMARY KEY AUTOINCREMENT semantics). This is distinct from
+     * complete() which leaves the row in place with status='done'.
+     */
+    remove(id) {
+        const db = getDatabase();
+        const res = db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
+        return res.changes > 0;
+    }
     snooze(id, untilMs) {
         const db = getDatabase();
         const now = Date.now();

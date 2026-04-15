@@ -40,5 +40,12 @@ export declare class TaskRepository {
     /** Update selected fields. Only provided keys are changed. Returns the updated row. */
     edit(id: number, patch: TaskEditPatch): TaskRecord | undefined;
     complete(id: number): boolean;
+    /**
+     * Hard-delete a task by id. Row is physically removed from the tasks table.
+     * The id is NOT reused — sqlite_sequence.tasks tracks the max-ever id
+     * (INTEGER PRIMARY KEY AUTOINCREMENT semantics). This is distinct from
+     * complete() which leaves the row in place with status='done'.
+     */
+    remove(id: number): boolean;
     snooze(id: number, untilMs: number): boolean;
 }

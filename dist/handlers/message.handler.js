@@ -265,7 +265,7 @@ export class MessageHandler {
                 else if (response.functionCall.name === 'search_memory' || response.functionCall.name === 'update_core_memory' || response.functionCall.name === 'append_person_note' || response.functionCall.name === 'append_project_note') {
                     actionSummary = await this.handleMemoryFunction(jid, response.functionCall.name, response.functionCall.args, message);
                 }
-                else if (response.functionCall.name === 'add_task' || response.functionCall.name === 'list_tasks' || response.functionCall.name === 'edit_task' || response.functionCall.name === 'complete_task' || response.functionCall.name === 'snooze_task') {
+                else if (response.functionCall.name === 'add_task' || response.functionCall.name === 'list_tasks' || response.functionCall.name === 'edit_task' || response.functionCall.name === 'complete_task' || response.functionCall.name === 'delete_task' || response.functionCall.name === 'snooze_task') {
                     actionSummary = await this.handleTaskFunction(jid, response.functionCall.name, response.functionCall.args, message);
                 }
                 else {
@@ -1705,6 +1705,34 @@ ${config.botPrefix} Tell me a joke
                     const ok = repo.complete(id);
                     await this.whatsapp.sendReply(jid, ok ? `✅ #${id} סומן כ-done.` : `לא הצלחתי להשלים #${id}.`, message);
                     return `[complete_task: #${id} ok=${ok}]`;
+                }
+                case 'delete_task': {
+                    let id = args.id ? Number(args.id) : undefined;
+                    if (!id && args.query) {
+                        const matches = repo.findByTitle(jid, String(args.query));
+                        if (matches.length === 0) {
+                            await this.whatsapp.sendReply(jid, `לא מצאתי משימה תואמת ל-"${args.query}".`, message);
+                            return '[delete_task: no match]';
+                        }
+                        if (matches.length > 1) {
+                            const list = matches.map(m => `#${m.id} ${m.title}`).join('\n');
+                            await this.whatsapp.sendReply(jid, `מספר התאמות:\n${list}\nציין id מדויק למחיקה.`, message);
+                            return '[delete_task: ambiguous]';
+                        }
+                        id = matches[0].id;
+                    }
+                    if (!id) {
+                        await this.whatsapp.sendReply(jid, 'ציין id או query של המשימה למחיקה.', message);
+                        return '[delete_task: no id]';
+                    }
+                    const existing = repo.getById(id);
+                    if (!existing || existing.jid !== jid) {
+                        await this.whatsapp.sendReply(jid, `לא מצאתי משימה #${id}.`, message);
+                        return `[delete_task: #${id} not found]`;
+                    }
+                    const ok = repo.remove(id);
+                    await this.whatsapp.sendReply(jid, ok ? `🗑️ נמחקה משימה #${id}: ${existing.title}` : `לא הצלחתי למחוק #${id}.`, message);
+                    return `[delete_task: #${id} ok=${ok}]`;
                 }
                 case 'snooze_task': {
                     let id = args.id ? Number(args.id) : undefined;

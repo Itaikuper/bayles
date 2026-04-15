@@ -541,7 +541,19 @@ const editTaskDeclaration: FunctionDeclaration = {
 
 const completeTaskDeclaration: FunctionDeclaration = {
   name: 'complete_task',
-  description: 'Mark a task as done. Provide either id (preferred) or query (substring of title). Use when the owner says "סיימתי X", "עשיתי את #N", "X done", "תסמן את X".',
+  description: 'Mark a task as DONE (finished). The task stays in the database with status=done — it just drops off the active list. Use ONLY when the owner says the task is finished: "סיימתי X", "עשיתי את #N", "X done", "תסמן את X כבוצע". Do NOT use for "מחק"/"delete"/"remove" — those mean the task should be wiped, not completed; use delete_task.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      id: { type: Type.NUMBER, description: 'Task id (preferred).' },
+      query: { type: Type.STRING, description: 'Substring of the task title — used if id is unknown.' },
+    },
+  },
+};
+
+const deleteTaskDeclaration: FunctionDeclaration = {
+  name: 'delete_task',
+  description: 'DELETE a task — permanently remove it from the list. Use when the owner says "מחק"/"תמחק"/"תמחוק"/"delete"/"remove"/"תסיר"/"drop"/"get rid of" a task. This is NOT the same as completing — delete means the task was a mistake or no longer relevant. Provide id (preferred) or query (substring of title).',
   parameters: {
     type: Type.OBJECT,
     properties: {
@@ -809,6 +821,7 @@ Messages in [brackets] in conversation history are factual records of actions yo
           listTasksDeclaration,
           editTaskDeclaration,
           completeTaskDeclaration,
+          deleteTaskDeclaration,
           snoozeTaskDeclaration,
         );
       } else {
